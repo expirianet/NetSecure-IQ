@@ -1,6 +1,6 @@
 # NetSecure-IQ
 
-![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
+![NetSecure-IQ Dashboard Overview](image-dashboard-overview.jpeg)
 
 Un'innovativa soluzione SaaS (Software as a Service), multi-tenant e multi-site, progettata per rivoluzionare il monitoraggio della sicurezza fisica e cibernetica. In un'era in cui la convergenza di questi due domini è essenziale, NetSecure-IQ offre una supervisione costante e proattiva delle installazioni, garantendo visibilità completa e controllo granulare sugli asset di sicurezza.
 
@@ -290,7 +290,7 @@ Per domande o supporto, puoi contattare il team di sviluppo tramite:
 
 # NetSecure-IQ
 
-![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
+![NetSecure-IQ Dashboard Overview](image-dashboard-overview.jpeg)
 
 An innovative SaaS (Software as a Service), multi-tenant, and multi-site solution designed to revolutionize physical and cybersecurity monitoring. In an era where the convergence of these two domains is essential, NetSecure-IQ offers constant and proactive supervision of installations, ensuring comprehensive visibility and granular control over security assets.
 
