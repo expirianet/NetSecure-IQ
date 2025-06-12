@@ -1,14 +1,6 @@
-Certo! Ecco il file `README.md` completo in italiano e in inglese, con tutte le modifiche discusse, inclusa la gestione della licenza proprietaria, la separazione degli ambienti di sviluppo e produzione Kubernetes, e l'inserimento del tuo username GitHub e della tua email di contatto.
-
----
-
-### File: `README.md` (Italiano)
-
-
 # NetSecure-IQ
 
 ![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
-*(Sostituisci `image_dashboard_overview.png` con un'immagine rappresentativa o GIF della tua dashboard, come quelle mostrate nel documento.)*
 
 Un'innovativa soluzione SaaS (Software as a Service), multi-tenant e multi-site, progettata per rivoluzionare il monitoraggio della sicurezza fisica e cibernetica. In un'era in cui la convergenza di questi due domini è essenziale, NetSecure-IQ offre una supervisione costante e proattiva delle installazioni, garantendo visibilità completa e controllo granulare sugli asset di sicurezza.
 
@@ -296,11 +288,9 @@ Per domande o supporto, puoi contattare il team di sviluppo tramite:
 
 ### File: `README.md` (English)
 
-```markdown
 # NetSecure-IQ
 
 ![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
-*(Replace `image_dashboard_overview.png` with a representative image or GIF of your dashboard, similar to those shown in the document.)*
 
 An innovative SaaS (Software as a Service), multi-tenant, and multi-site solution designed to revolutionize physical and cybersecurity monitoring. In an era where the convergence of these two domains is essential, NetSecure-IQ offers constant and proactive supervision of installations, ensuring comprehensive visibility and granular control over security assets.
 
