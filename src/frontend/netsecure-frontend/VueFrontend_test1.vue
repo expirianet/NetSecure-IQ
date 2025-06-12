@@ -2,7 +2,7 @@
     <div id="app">
         <h1>NetSecure IQ – Device Status</h1>
 
-        <form @submit.prevent="fetchStatus">
+      <form @submit.prevent="fetchStatus">
         <input v-model="mac" placeholder="Enter MAC address" />
         <button>Check Status</button>
     </form>
