@@ -1,3 +1,10 @@
+Certo! Ecco il file `README.md` completo in italiano e in inglese, con tutte le modifiche discusse, inclusa la gestione della licenza proprietaria, la separazione degli ambienti di sviluppo e produzione Kubernetes, e l'inserimento del tuo username GitHub e della tua email di contatto.
+
+---
+
+### File: `README.md` (Italiano)
+
+
 # NetSecure-IQ
 
 ![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
@@ -15,7 +22,13 @@ Un'innovativa soluzione SaaS (Software as a Service), multi-tenant e multi-site,
 * [Come Iniziare (Per Sviluppatori)](#come-iniziare-per-sviluppatori)
     * [Prerequisiti](#prerequisiti)
     * [Setup dell'Ambiente di Sviluppo](#setup-dellambiente-di-sviluppo)
-    * [Esecuzione dei Test](#esecuzione-dei-test)
+    * [Configurazione Database](#configurazione-database)
+    * [Configurazione Servizi Backend Go](#configurazione-servizi-backend-go)
+    * [Configurazione Frontend Vue.js](#configurazione-frontend-vuejs)
+    * [Deploy su Cluster Kubernetes (Produzione)](#deploy-su-cluster-kubernetes-produzione)
+    * [Esempio di docker-compose.yaml (per sviluppo standalone)](#esempio-di-docker-composeyaml-per-sviluppo-standalone)
+    * [Simula un MikroTik (Per PoC/Test)](#simula-un-mikrotik-per-poctest)
+* [Esecuzione dei Test](#esecuzione-dei-test)
 * [Contribuire](#contribuire)
 * [Licenza](#licenza)
 * [Contatti](#contatti)
@@ -38,7 +51,7 @@ NetSecure-IQ è una piattaforma dedicata al monitoraggio centralizzato e in temp
 La nostra architettura è robusta e scalabile, costruita su tecnologie moderne per garantire prestazioni e affidabilità.
 
 ![NetSecure-IQ Logical Diagram](NetSecure%20IQ%20-%20EN01-image-000.png)
-*(Questo è un segnaposto per il diagramma logico dell'architettura che è presente nel documento originale.)*
+*(Questo è un segnapato per il diagramma logico dell'architettura che è presente nel documento originale.)*
 
 ### Componenti Principali:
 
@@ -61,13 +74,15 @@ Principi di sicurezza e privacy fondamentali includono: minimizzazione dei dati,
 
 * **Backend:** Go
 * **Frontend:** Vue.js
-* **Orchestrazione:** Kubernetes
+* **Orchestrazione:**
+    * **Sviluppo:** Docker, Minikube (opzionale)
+    * **Produzione:** Kubernetes (cluster a 3 nodi)
 * **Database Time-Series:** InfluxDB
 * **Database Relazionale:** PostgreSQL
 * **VPN:** WireGuard
 * **Dispositivi Edge:** MikroTik RouterOS
 * **Containerizzazione:** Docker
-* **Monitoraggio Cluster (futuro):** Prometheus, Grafana (probabile)
+* **Monitoraggio Cluster (Produzione):** Prometheus, Grafana (probabile)
 
 ## Come Iniziare (Per Sviluppatori)
 
@@ -80,8 +95,9 @@ Assicurati di avere installato i seguenti strumenti:
 * [Git](https://git-scm.com/downloads)
 * [Go](https://golang.org/doc/install) (versione X.X o superiore)
 * [Node.js](https://nodejs.org/en/download/) (versione X.X o superiore) e [Yarn](https://classic.yarnpkg.com/en/docs/install/) (consigliato per Vue.js)
-* [Docker Desktop](https://www.docker.com/products/docker-desktop) (include Docker Engine e Docker Compose)
-* [Minikube](https://minikube.sigs.k8s.io/docs/start/) o [k3s](https://k3s.io/#installation) (per un ambiente Kubernetes locale)
+* [Docker Desktop](https://www.docker.com/products/docker-desktop)
+* [Minikube](https://minikube.sigs.k8s.io/docs/start/) (opzionale, per simulare un cluster Kubernetes locale)
+* [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) (strumento da riga di comando per interagire con Kubernetes)
 * Un editor di codice (es. [VS Code](https://code.visualstudio.com/))
 
 ### Setup dell'Ambiente di Sviluppo
@@ -92,37 +108,166 @@ Assicurati di avere installato i seguenti strumenti:
     cd NetSecure-IQ
     ```
 
-2.  **Configura il Backend Go:**
+2.  **Configurazione per Sviluppo Standalone (con Docker e Minikube - Opzionale):**
+    * Se *non* usi Minikube, puoi eseguire i servizi backend e frontend direttamente con Docker Compose. Crea un file `docker-compose.yaml` (vedi esempio sotto) e usa `docker-compose up`.
+    * Se *usi* Minikube:
+        * Avvia Minikube: `minikube start`
+        * Configura `kubectl` per usare Minikube: `kubectl config use-context minikube`
+        * Applica i deployment e i servizi Kubernetes (inclusi InfluxDB e PostgreSQL):
+            ```bash
+            kubectl apply -f config/kubernetes/database/postgresql-deployment.yaml
+            kubectl apply -f config/kubernetes/database/influxdb-deployment.yaml
+            # E gli eventuali Persistent Volume Claims (PVC)
+            kubectl apply -f config/kubernetes/services/
+            kubectl apply -f config/kubernetes/deployments/
+            ```
+
+3.  **Configurazione Database (InfluxDB e PostgreSQL):**
+
+    * **InfluxDB:**
+        * Per lo sviluppo, puoi usare l'immagine Docker ufficiale.
+        * In produzione, considera Persistent Volumes e Persistent Volume Claims (PVC) per i dati.
+        * Configura le variabili d'ambiente (es. `INFLUXDB_ADMIN_USER`, `INFLUXDB_ADMIN_PASSWORD`) nel deployment Kubernetes.
+        * Esempio di deployment (in `config/kubernetes/database/influxdb-deployment.yaml`):
+            ```yaml
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: influxdb
+            spec:
+              # ...
+              template:
+                spec:
+                  containers:
+                    - name: influxdb
+                      image: influxdb:latest
+                      ports:
+                        - containerPort: 8086
+                      env:
+                        - name: INFLUXDB_ADMIN_USER
+                          value: "admin"
+                        - name: INFLUXDB_ADMIN_PASSWORD
+                          value: "your_password"
+                      volumeMounts:
+                        - name: influxdb-data
+                          mountPath: /var/lib/influxdb
+                  volumes:
+                    - name: influxdb-data
+                      # ... (Configura il Persistent Volume o EmptyDir)
+            ```
+
+    * **PostgreSQL:**
+        * Per lo sviluppo, puoi usare l'immagine Docker ufficiale.
+        * In produzione, *usa* Persistent Volumes e Persistent Volume Claims (PVC) per i dati.
+        * Configura le variabili d'ambiente (es. `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) nel deployment Kubernetes.
+        * Esempio di deployment (in `config/kubernetes/database/postgresql-deployment.yaml`):
+            ```yaml
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: postgresql
+            spec:
+              # ...
+              template:
+                spec:
+                  containers:
+                    - name: postgresql
+                      image: postgres:13
+                      ports:
+                        - containerPort: 5432
+                      env:
+                        - name: POSTGRES_USER
+                          value: "netsecure_iq"
+                        - name: POSTGRES_PASSWORD
+                          value: "your_secure_password"
+                        - name: POSTGRES_DB
+                          value: "netsecure_iq_db"
+                      volumeMounts:
+                        - name: postgresql-data
+                          mountPath: /var/lib/postgresql/data
+                  volumes:
+                    - name: postgresql-data
+                      # ... (Configura il Persistent Volume o EmptyDir)
+            ```
+
+4.  **Configurazione Servizi Backend Go:**
     * Naviga nella directory del backend: `cd src/backend`
     * Installa le dipendenze Go: `go mod tidy`
-    * (Opzionale) Configura le variabili d'ambiente necessarie (vedi `config/backend_env/`)
-    * Avvia il backend (per il PoC, potrebbe essere un semplice `go run main.go` o un deployment Minikube/k3s)
+    * (Opzionale) Configura le variabili d'ambiente necessarie (vedi `config/backend_env/`). Queste *devono* corrispondere alle configurazioni del database (es. indirizzi, username, password).
+    * In sviluppo standalone, puoi eseguire i servizi direttamente con `go run main.go` (o il comando specifico per il servizio). In produzione, usa le immagini Docker e i deployment Kubernetes.
 
-3.  **Configura il Frontend Vue.js:**
+5.  **Configurazione Frontend Vue.js:**
     * Naviga nella directory del frontend: `cd src/frontend`
     * Installa le dipendenze Node.js: `yarn install` (o `npm install`)
-    * (Opzionale) Configura le variabili d'ambiente necessarie (vedi `config/frontend_env/`)
-    * Avvia il server di sviluppo Vue.js: `yarn serve` (o `npm run serve`)
+    * (Opzionale) Configura le variabili d'ambiente necessarie (vedi `config/frontend_env/`). Queste *devono* corrispondere all'indirizzo del backend.
+    * In sviluppo, avvia il server di sviluppo Vue.js: `yarn serve` (o `npm run serve`). In produzione, usa l'immagine Docker.
 
-4.  **Configura l'Infrastruttura Locale (Kubernetes con Minikube/k3s):**
-    * Avvia il tuo cluster Kubernetes locale (es. `minikube start`)
-    * Applica le configurazioni di InfluxDB e PostgreSQL:
+6.  **Deploy su Cluster Kubernetes (Produzione):**
+    * Assicurati che `kubectl` sia configurato per puntare al tuo cluster Kubernetes di produzione (a 3 nodi).
+    * Applica i deployment e i servizi Kubernetes (inclusi InfluxDB e PostgreSQL, se non già esistenti):
         ```bash
         kubectl apply -f config/kubernetes/database/postgresql-deployment.yaml
         kubectl apply -f config/kubernetes/database/influxdb-deployment.yaml
         # E gli eventuali Persistent Volume Claims (PVC)
+        kubectl apply -f config/kubernetes/services/
+        kubectl apply -f config/kubernetes/deployments/
         ```
-    * Applica i deployment per i servizi Go:
-        ```bash
-        kubectl apply -f config/kubernetes/deployments/backend-service-x-deployment.yaml
-        # ... per tutti i servizi
-        ```
-    * Configura l'Ingress Controller e il WireGuard VPN Server (vedi `config/kubernetes/` per i dettagli).
+    * Configura l'Ingress Controller per esporre i servizi.
+    * Configura il WireGuard VPN Server sul cluster (vedi `config/kubernetes/` per i dettagli).
 
-5.  **Simula un MikroTik (Per PoC):**
-    * Per la fase PoC, potresti dover eseguire manualmente o simulare gli script MikroTik per inviare dati al tuo backend locale.
+7.  **Esempio di `docker-compose.yaml` (per sviluppo standalone):**
+    ```yaml
+    version: "3.9"
+    services:
+      postgresql:
+        image: postgres:13
+        ports:
+          - "5432:5432"
+        volumes:
+          - postgresql_data:/var/lib/postgresql/data
+        environment:
+          POSTGRES_USER: netsecure_iq
+          POSTGRES_PASSWORD: your_secure_password
+          POSTGRES_DB: netsecure_iq_db
 
-### Esecuzione dei Test
+      influxdb:
+        image: influxdb:latest
+        ports:
+          - "8086:8086"
+        volumes:
+          - influxdb_data:/var/lib/influxdb
+        environment:
+          INFLUXDB_ADMIN_USER: admin
+          INFLUXDB_ADMIN_PASSWORD: your_password
+
+      backend:
+        build: ./src/backend
+        ports:
+          - "8000:8000" # Esempio, adatta le porte
+        environment:
+          # ... (Variabili d'ambiente per il backend, inclusi i dettagli del database)
+        depends_on:
+          - postgresql
+          - influxdb
+
+      frontend:
+        build: ./src/frontend
+        ports:
+          - "8080:8080" # Esempio, adatta le porte
+        environment:
+          # ... (Variabili d'ambiente per il frontend, incluso l'indirizzo del backend)
+        depends_on:
+          - backend
+
+    volumes:
+      postgresql_data:
+      influxdb_data:
+    ```
+
+8.  **Simula un MikroTik (Per PoC/Test):**
+    * Per la fase PoC o per i test, potresti dover eseguire manualmente o simulare gli script MikroTik per inviare dati al tuo backend.
+
+## Esecuzione dei Test
 
 * **Test Unitari:**
     * Backend: `go test ./...` da `src/backend`
@@ -136,7 +281,7 @@ Accogliamo con favore i contributi dei membri autorizzati del team. Tutti i cont
 
 ## Licenza
 
-Questo progetto è una proprietà aziendale di [Nome della Tua Azienda o Organizzazione]. Tutti i diritti sono riservati. Il codice sorgente non è open source e non può essere riprodotto, modificato o distribuito senza esplicita autorizzazione. L'utilizzo di NetSecure-IQ è regolamentato da specifici accordi di servizio e termini d'uso forniti dalla nostra azienda.
+Questo progetto è una proprietà aziendale di Experianet. Tutti i diritti sono riservati. Il codice sorgente non è open source e non può essere riprodotto, modificato o distribuito senza esplicita autorizzazione. L'utilizzo di NetSecure-IQ è regolamentato da specifici accordi di servizio e termini d'uso forniti dalla nostra azienda.
 
 Per informazioni commerciali o partnership, si prega di contattarci.
 
@@ -151,6 +296,7 @@ Per domande o supporto, puoi contattare il team di sviluppo tramite:
 
 ### File: `README.md` (English)
 
+```markdown
 # NetSecure-IQ
 
 ![NetSecure-IQ Dashboard Overview](image_dashboard_overview.png)
@@ -168,7 +314,13 @@ An innovative SaaS (Software as a Service), multi-tenant, and multi-site solutio
 * [Getting Started (For Developers)](#getting-started-for-developers)
     * [Prerequisites](#prerequisites)
     * [Setting Up the Development Environment](#setting-up-the-development-environment)
-    * [Running Tests](#running-tests)
+    * [Database Configuration](#database-configuration)
+    * [Configuring Go Backend Services](#configuring-go-backend-services)
+    * [Configuring Vue.js Frontend](#configuring-vuejs-frontend)
+    * [Deploy to Kubernetes Cluster (Production)](#deploy-to-kubernetes-cluster-production)
+    * [Example docker-compose.yaml (for standalone development)](#example-docker-composeyaml-for-standalone-development)
+    * [Simulate a MikroTik (For PoC/Testing)](#simulate-a-mikrotik-for-poctesting)
+* [Running Tests](#running-tests)
 * [Contributing](#contributing)
 * [License](#license)
 * [Contact](#contact)
@@ -214,13 +366,15 @@ Fundamental security and privacy pillars include: data minimization, encryption 
 
 * **Backend:** Go
 * **Frontend:** Vue.js
-* **Orchestration:** Kubernetes
+* **Orchestration:**
+    * **Development:** Docker, Minikube (optional)
+    * **Production:** Kubernetes (3-node cluster)
 * **Time-Series Database:** InfluxDB
 * **Relational Database:** PostgreSQL
 * **VPN:** WireGuard
 * **Edge Devices:** MikroTik RouterOS
 * **Containerization:** Docker
-* **Cluster Monitoring (future):** Prometheus, Grafana (likely)
+* **Cluster Monitoring (Production):** Prometheus, Grafana (likely)
 
 ## Getting Started (For Developers)
 
@@ -233,8 +387,9 @@ Ensure you have the following tools installed:
 * [Git](https://git-scm.com/downloads)
 * [Go](https://golang.org/doc/install) (version X.X or higher)
 * [Node.js](https://nodejs.org/en/download/) (version X.X or higher) and [Yarn](https://classic.yarnpkg.com/en/docs/install/) (recommended for Vue.js)
-* [Docker Desktop](https://www.docker.com/products/docker-desktop) (includes Docker Engine and Docker Compose)
-* [Minikube](https://minikube.sigs.k8s.io/docs/start/) or [k3s](https://k3s.io/#installation) (for a local Kubernetes environment)
+* [Docker Desktop](https://www.docker.com/products/docker-desktop)
+* [Minikube](https://minikube.sigs.k8s.io/docs/start/) (optional, to simulate a local Kubernetes cluster)
+* [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) (command-line tool for interacting with Kubernetes)
 * A code editor (e.g., [VS Code](https://code.visualstudio.com/))
 
 ### Setting Up the Development Environment
@@ -245,37 +400,166 @@ Ensure you have the following tools installed:
     cd NetSecure-IQ
     ```
 
-2.  **Configure the Go Backend:**
+2.  **Standalone Development Setup (with Docker and Minikube - Optional):**
+    * If you are *not* using Minikube, you can run the backend and frontend services directly with Docker Compose. Create a `docker-compose.yaml` file (see example below) and use `docker-compose up`.
+    * If you *are* using Minikube:
+        * Start Minikube: `minikube start`
+        * Configure `kubectl` to use Minikube: `kubectl config use-context minikube`
+        * Apply the Kubernetes deployments and services (including InfluxDB and PostgreSQL):
+            ```bash
+            kubectl apply -f config/kubernetes/database/postgresql-deployment.yaml
+            kubectl apply -f config/kubernetes/database/influxdb-deployment.yaml
+            # And any Persistent Volume Claims (PVCs)
+            kubectl apply -f config/kubernetes/services/
+            kubectl apply -f config/kubernetes/deployments/
+            ```
+
+3.  **Database Configuration (InfluxDB and PostgreSQL):**
+
+    * **InfluxDB:**
+        * For development, you can use the official Docker image.
+        * In production, *use* Persistent Volumes and Persistent Volume Claims (PVCs) for the data.
+        * Configure environment variables (e.g., `INFLUXDB_ADMIN_USER`, `INFLUXDB_ADMIN_PASSWORD`) in the Kubernetes deployment.
+        * Example deployment (in `config/kubernetes/database/influxdb-deployment.yaml`):
+            ```yaml
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: influxdb
+            spec:
+              # ...
+              template:
+                spec:
+                  containers:
+                    - name: influxdb
+                      image: influxdb:latest
+                      ports:
+                        - containerPort: 8086
+                      env:
+                        - name: INFLUXDB_ADMIN_USER
+                          value: "admin"
+                        - name: INFLUXDB_ADMIN_PASSWORD
+                          value: "your_password"
+                      volumeMounts:
+                        - name: influxdb-data
+                          mountPath: /var/lib/influxdb
+                  volumes:
+                    - name: influxdb-data
+                      # ... (Configure the Persistent Volume or EmptyDir)
+            ```
+
+    * **PostgreSQL:**
+        * For development, you can use the official Docker image.
+        * In production, *always use* Persistent Volumes and Persistent Volume Claims (PVCs) for the data.
+        * Configure environment variables (e.g., `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) in the Kubernetes deployment.
+        * Example deployment (in `config/kubernetes/database/postgresql-deployment.yaml`):
+            ```yaml
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: postgresql
+            spec:
+              # ...
+              template:
+                spec:
+                  containers:
+                    - name: postgresql
+                      image: postgres:13
+                      ports:
+                        - containerPort: 5432
+                      env:
+                        - name: POSTGRES_USER
+                          value: "netsecure_iq"
+                        - name: POSTGRES_PASSWORD
+                          value: "your_secure_password"
+                        - name: POSTGRES_DB
+                          value: "netsecure_iq_db"
+                      volumeMounts:
+                        - name: postgresql-data
+                          mountPath: /var/lib/postgresql/data
+                  volumes:
+                    - name: postgresql-data
+                      # ... (Configure the Persistent Volume or EmptyDir)
+            ```
+
+4.  **Configuring Go Backend Services:**
     * Navigate to the backend directory: `cd src/backend`
     * Install Go dependencies: `go mod tidy`
-    * (Optional) Configure necessary environment variables (see `config/backend_env/`)
-    * Start the backend (for PoC, this might be a simple `go run main.go` or a Minikube/k3s deployment)
+    * (Optional) Configure necessary environment variables (see `config/backend_env/`). These *must* match your database configurations (e.g., addresses, usernames, passwords).
+    * In standalone development, you can run services directly with `go run main.go` (or the specific command for the service). In production, use the Docker images and Kubernetes deployments.
 
-3.  **Configure the Vue.js Frontend:**
+5.  **Configuring Vue.js Frontend:**
     * Navigate to the frontend directory: `cd src/frontend`
     * Install Node.js dependencies: `yarn install` (or `npm install`)
-    * (Optional) Configure necessary environment variables (see `config/frontend_env/`)
-    * Start the Vue.js development server: `yarn serve` (or `npm run serve`)
+    * (Optional) Configure necessary environment variables (see `config/frontend_env/`). These *must* match your backend address.
+    * In development, start the Vue.js development server: `yarn serve` (or `npm run serve`). In production, use the Docker image.
 
-4.  **Configure Local Infrastructure (Kubernetes with Minikube/k3s):**
-    * Start your local Kubernetes cluster (e.g., `minikube start`)
-    * Apply InfluxDB and PostgreSQL configurations:
+6.  **Deploy to Kubernetes Cluster (Production):**
+    * Ensure `kubectl` is configured to point to your production Kubernetes cluster (3-node).
+    * Apply the Kubernetes deployments and services (including InfluxDB and PostgreSQL, if not already existing):
         ```bash
         kubectl apply -f config/kubernetes/database/postgresql-deployment.yaml
         kubectl apply -f config/kubernetes/database/influxdb-deployment.yaml
         # And any Persistent Volume Claims (PVCs)
+        kubectl apply -f config/kubernetes/services/
+        kubectl apply -f config/kubernetes/deployments/
         ```
-    * Apply deployments for Go services:
-        ```bash
-        kubectl apply -f config/kubernetes/deployments/backend-service-x-deployment.yaml
-        # ... for all services
-        ```
-    * Configure the Ingress Controller and WireGuard VPN Server (refer to `config/kubernetes/` for details).
+    * Configure the Ingress Controller to expose the services.
+    * Configure the WireGuard VPN Server on the cluster (refer to `config/kubernetes/` for details).
 
-5.  **Simulate a MikroTik (For PoC):**
-    * For the PoC phase, you might need to manually run or simulate MikroTik scripts to send data to your local backend.
+7.  **Example `docker-compose.yaml` (for standalone development):**
+    ```yaml
+    version: "3.9"
+    services:
+      postgresql:
+        image: postgres:13
+        ports:
+          - "5432:5432"
+        volumes:
+          - postgresql_data:/var/lib/postgresql/data
+        environment:
+          POSTGRES_USER: netsecure_iq
+          POSTGRES_PASSWORD: your_secure_password
+          POSTGRES_DB: netsecure_iq_db
 
-### Running Tests
+      influxdb:
+        image: influxdb:latest
+        ports:
+          - "8086:8086"
+        volumes:
+          - influxdb_data:/var/lib/influxdb
+        environment:
+          INFLUXDB_ADMIN_USER: admin
+          INFLUXDB_ADMIN_PASSWORD: your_password
+
+      backend:
+        build: ./src/backend
+        ports:
+          - "8000:8000" # Example, adjust ports
+        environment:
+          # ... (Environment variables for the backend, including database details)
+        depends_on:
+          - postgresql
+          - influxdb
+
+      frontend:
+        build: ./src/frontend
+        ports:
+          - "8080:8080" # Example, adjust ports
+        environment:
+          # ... (Environment variables for the frontend, including the backend address)
+        depends_on:
+          - backend
+
+    volumes:
+      postgresql_data:
+      influxdb_data:
+    ```
+
+8.  **Simulate a MikroTik (For PoC/Testing):**
+    * For the PoC phase or testing, you might need to manually run or simulate MikroTik scripts to send data to your backend.
+
+## Running Tests
 
 * **Unit Tests:**
     * Backend: `go test ./...` from `src/backend`
@@ -289,7 +573,7 @@ We welcome contributions from authorized team members. All contributions are sub
 
 ## License
 
-This project is a proprietary asset of [Your Company or Organization Name]. All rights reserved. The source code is not open source and may not be reproduced, modified, or distributed without explicit authorization. The use of NetSecure-IQ is governed by specific service agreements and terms of use provided by our company.
+This project is a proprietary asset of Experianet. All rights reserved. The source code is not open source and may not be reproduced, modified, or distributed without explicit authorization. The use of NetSecure-IQ is governed by specific service agreements and terms of use provided by our company.
 
 For commercial inquiries or partnerships, please contact us.
 
