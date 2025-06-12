@@ -1,4 +1,4 @@
-<template>
+<template> 
     <div id="app">
         <h1>NetSecure IQ – Device Status</h1>
 
