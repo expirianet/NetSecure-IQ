@@ -14,17 +14,25 @@ spec:
     spec:
       containers:
         - name: influxdb
-          image: influxdb:latest
+          image: influxdb:2.7
           ports:
             - containerPort: 8086
           env:
-            - name: INFLUXDB_ADMIN_USER
-              value: "admin"
-            - name: INFLUXDB_ADMIN_PASSWORD
-              value: "your_password"
+            - name: DOCKER_INFLUXDB_INIT_MODE
+              value: setup
+            - name: DOCKER_INFLUXDB_INIT_USERNAME
+              value: admin
+            - name: DOCKER_INFLUXDB_INIT_PASSWORD
+              value: your_password
+            - name: DOCKER_INFLUXDB_INIT_ORG
+              value: netsecure
+            - name: DOCKER_INFLUXDB_INIT_BUCKET
+              value: netsecure_bucket
+            - name: DOCKER_INFLUXDB_INIT_RETENTION
+              value: 30d
           volumeMounts:
             - name: influxdb-data
-              mountPath: /var/lib/influxdb
+              mountPath: /var/lib/influxdb2
       volumes:
         - name: influxdb-data
           emptyDir: {}
