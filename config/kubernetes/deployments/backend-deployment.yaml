@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: netsecure-backend:latest  # Replace with actual image if needed
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_USER
+              value: "netsecure_iq"
+            - name: POSTGRES_PASSWORD
+              value: "your_secure_password"
+            - name: POSTGRES_DB
+              value: "netsecure_iq_db"
+            - name: INFLUXDB_ADMIN_USER
+              value: "admin"
+            - name: INFLUXDB_ADMIN_PASSWORD
+              value: "your_password"
