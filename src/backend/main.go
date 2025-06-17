@@ -66,7 +66,7 @@ func saveToInflux(mac, status string) error {
 		token  = "my-token"
 		bucket = "netsecure"
 		org    = "netsecure-org"
-		url    = "http://localhost:8086"
+		url    = "http://influxdb:8086"
 	)
 
 	client := influxdb2.NewClient(url, token)
