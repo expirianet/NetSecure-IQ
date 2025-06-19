@@ -10,8 +10,8 @@ import (
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
-	"golang.org/x/crypto/bcrypt"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // MikroTikData represents the structure of the data sent from MikroTik
@@ -44,6 +44,7 @@ func main() {
 
 	http.HandleFunc("/api/ping", handlePing)
 	http.HandleFunc("/api/register", withCORS(handleRegister))
+	http.HandleFunc("/api/login", withCORS(handleLogin))
 
 	fmt.Println("Go Backend is running on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -141,6 +142,50 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintln(w, "User registered successfully")
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password required", http.StatusBadRequest)
+		return
+	}
+
+	var hash string
+	err := db.QueryRow("SELECT password_hash FROM users WHERE email = $1", req.Email).Scan(&hash)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password))
+	if err != nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	fmt.Fprintln(w, "Login successful")
 }
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {

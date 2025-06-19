@@ -1,16 +1,15 @@
 <template>
   <div id="app">
-    <RegisterForm />
+    <nav>
+      <router-link to="/login">Login</router-link> |
+      <router-link to="/register">Register</router-link>
+    </nav>
+    <router-view />
   </div>
 </template>
 
 <script>
-import RegisterForm from './components/RegisterForm.vue'
-
 export default {
-  name: 'App',
-  components: {
-    RegisterForm
-  }
+  name: 'App'
 }
 </script>
