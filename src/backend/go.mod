@@ -2,7 +2,11 @@ module netsecure-backend
 
 go 1.24.4
 
-require github.com/influxdata/influxdb-client-go/v2 v2.14.0
+require (
+	github.com/influxdata/influxdb-client-go/v2 v2.14.0
+	github.com/lib/pq v1.10.9
+	golang.org/x/crypto v0.39.0
+)
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect

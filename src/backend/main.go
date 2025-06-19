@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"golang.org/x/crypto/bcrypt"
+	_ "github.com/lib/pq"
 )
 
 // MikroTikData represents the structure of the data sent from MikroTik
@@ -17,14 +20,31 @@ type MikroTikData struct {
 	Status string `json:"status"` // "online" or "offline"
 }
 
-// Simulated database of known MikroTik MAC addresses
-var knownMACs = map[string]bool{
-	"AA:BB:CC:DD:EE:FF": true,
-	"11:22:33:44:55:66": true,
+// RegisterRequest represents a user registration payload
+type RegisterRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
+var (
+	knownMACs = map[string]bool{
+		"AA:BB:CC:DD:EE:FF": true,
+		"11:22:33:44:55:66": true,
+	}
+	db *sql.DB
+)
+
 func main() {
+	var err error
+	connStr := "host=postgresql user=netsecure_iq password=your_secure_password dbname=netsecure_iq_db sslmode=disable"
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal("Failed to connect to DB:", err)
+	}
+
 	http.HandleFunc("/api/ping", handlePing)
+	http.HandleFunc("/api/register", withCORS(handleRegister))
+
 	fmt.Println("Go Backend is running on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -61,7 +81,6 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveToInflux(mac, status string) error {
-	// Adjust these parameters to match your InfluxDB config
 	const (
 		token  = "my-token"
 		bucket = "netsecure"
@@ -82,4 +101,56 @@ func saveToInflux(mac, status string) error {
 	)
 
 	return writeAPI.WritePoint(context.Background(), point)
+}
+
+func handleRegister(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password required", http.StatusBadRequest)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Password hash failed", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.Exec(`INSERT INTO users (email, password_hash) VALUES ($1, $2)`, req.Email, string(hash))
+	if err != nil {
+		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintln(w, "User registered successfully")
+}
+
+func withCORS(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h(w, r)
+	}
 }
