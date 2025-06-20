@@ -20,6 +20,13 @@ type MikroTikData struct {
 	Status string `json:"status"` // "online" or "offline"
 }
 
+// RouterStatus represents a single router record from InfluxDB
+type RouterStatus struct {
+	MAC   string `json:"mac"`
+	Value string `json:"value"`
+	Time  string `json:"time"`
+}
+
 // RegisterRequest represents a user registration payload
 type RegisterRequest struct {
 	Email    string `json:"email"`
@@ -45,6 +52,7 @@ func main() {
 	http.HandleFunc("/api/ping", handlePing)
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
+	http.HandleFunc("/api/data/routers", withCORS(handleRouterData))
 
 	fmt.Println("Go Backend is running on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -198,4 +206,50 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 		}
 		h(w, r)
 	}
+}
+
+func handleRouterData(w http.ResponseWriter, r *http.Request) {
+	const (
+		token  = "my-token"
+		bucket = "netsecure"
+		org    = "netsecure-org"
+		url    = "http://influxdb:8086"
+	)
+
+	client := influxdb2.NewClient(url, token)
+	defer client.Close()
+
+	queryAPI := client.QueryAPI(org)
+	query := `
+		from(bucket: "netsecure")
+			|> range(start: -7d)
+			|> filter(fn: (r) => r._measurement == "device_status")
+			|> filter(fn: (r) => r._field == "status")
+	`
+
+	result, err := queryAPI.Query(context.Background(), query)
+	if err != nil {
+		http.Error(w, "InfluxDB query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var output []RouterStatus
+
+	for result.Next() {
+		record := result.Record()
+		entry := RouterStatus{
+			MAC:   record.ValueByKey("mac").(string),
+			Value: fmt.Sprintf("%v", record.Value()),
+			Time:  record.Time().Format(time.RFC3339),
+		}
+		output = append(output, entry)
+	}
+
+	if result.Err() != nil {
+		http.Error(w, "Query parsing failed: "+result.Err().Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(output)
 }

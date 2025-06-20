@@ -31,8 +31,11 @@ export default {
 
         const text = await res.text()
         if (!res.ok) throw new Error(text)
-
-        this.message = 'Login successful!'
+        
+        this.message = 'Login successful! Redirecting...'
+        setTimeout(() => {
+          this.$router.push('/dashboard')
+        }, 500) // or even 100ms works
       } catch (err) {
         this.message = 'Error: ' + err.message
       }
