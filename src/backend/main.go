@@ -17,7 +17,7 @@ import (
 // MikroTikData represents the structure of the data sent from MikroTik
 type MikroTikData struct {
 	MAC    string `json:"mac"`
-	Status string `json:"status"` // "online" or "offline"
+	Status string `json:"status"` // "online", "offline", etc.
 }
 
 // RouterStatus represents a single router record from InfluxDB
@@ -33,13 +33,7 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
-var (
-	knownMACs = map[string]bool{
-		"AA:BB:CC:DD:EE:FF": true,
-		"11:22:33:44:55:66": true,
-	}
-	db *sql.DB
-)
+var db *sql.DB
 
 func main() {
 	var err error
@@ -49,10 +43,11 @@ func main() {
 		log.Fatal("Failed to connect to DB:", err)
 	}
 
-	http.HandleFunc("/api/ping", handlePing)
+	http.HandleFunc("/api/ping", withCORS(handlePing))
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/data/routers", withCORS(handleRouterData))
+	http.HandleFunc("/api/register-mac", withCORS(handleRegisterMAC)) // ✅ NEW
 
 	fmt.Println("Go Backend is running on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -70,15 +65,33 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify if the MAC address is known
-	if !knownMACs[data.MAC] {
-		http.Error(w, "Unknown MAC address", http.StatusUnauthorized)
+	// Check if MAC is already known (exists in Influx)
+	const (
+		token  = "my-token"
+		bucket = "netsecure"
+		org    = "netsecure-org"
+		url    = "http://influxdb:8086"
+	)
+
+	client := influxdb2.NewClient(url, token)
+	defer client.Close()
+
+	queryAPI := client.QueryAPI(org)
+	query := fmt.Sprintf(`
+		from(bucket: "%s")
+			|> range(start: -30d)
+			|> filter(fn: (r) => r._measurement == "device_status")
+			|> filter(fn: (r) => r.mac == "%s")
+			|> limit(n:1)
+	`, bucket, data.MAC)
+
+	result, err := queryAPI.Query(context.Background(), query)
+	if err != nil || !result.Next() {
+		http.Error(w, "MAC not known. Please register it first.", http.StatusUnauthorized)
 		return
 	}
 
-	fmt.Printf("Received data from %s with status: %s\n", data.MAC, data.Status)
-
-	// Save to InfluxDB
+	// MAC exists — update with new status
 	if err := saveToInflux(data.MAC, data.Status); err != nil {
 		log.Printf("InfluxDB write failed: %v\n", err)
 		http.Error(w, "Failed to save data", http.StatusInternalServerError)
@@ -86,7 +99,64 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Data received and stored"))
+	w.Write([]byte("Status updated"))
+}
+
+func handleRegisterMAC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type reqBody struct {
+		MAC string `json:"mac"`
+	}
+
+	var req reqBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
+		http.Error(w, "Invalid MAC address", http.StatusBadRequest)
+		return
+	}
+
+	// Check if MAC already exists in InfluxDB
+	const (
+		token  = "my-token"
+		bucket = "netsecure"
+		org    = "netsecure-org"
+		url    = "http://influxdb:8086"
+	)
+
+	client := influxdb2.NewClient(url, token)
+	defer client.Close()
+
+	queryAPI := client.QueryAPI(org)
+	query := fmt.Sprintf(`
+		from(bucket: "%s")
+			|> range(start: -30d)
+			|> filter(fn: (r) => r._measurement == "device_status")
+			|> filter(fn: (r) => r.mac == "%s")
+			|> limit(n:1)
+	`, bucket, req.MAC)
+
+	result, err := queryAPI.Query(context.Background(), query)
+	if err == nil && result.Next() {
+		http.Error(w, "MAC already exists", http.StatusConflict)
+		return
+	}
+
+	if result.Err() != nil {
+		http.Error(w, "InfluxDB query failed: "+result.Err().Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Write only if it doesn't exist
+	if err := saveToInflux(req.MAC, "unknown"); err != nil {
+		http.Error(w, "Failed to register MAC: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("MAC registered with status 'unknown'"))
 }
 
 func saveToInflux(mac, status string) error {
