@@ -15,12 +15,11 @@
           placeholder="Password"
           required
         />
+
         <button :disabled="loading" type="submit">
           {{ loading ? "Loading..." : "Register" }}
         </button>
       </form>
-
-
 
       <div class="link">
         <span>Have already an account ?</span>
@@ -39,6 +38,7 @@ import { ref } from "vue"
 
 const email = ref("")
 const password = ref("")
+
 const message = ref("")
 const successMessage = ref(false)
 const loading = ref(false)
@@ -49,7 +49,10 @@ const register = async () => {
     const res = await fetch("http://localhost:8000/api/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email.value, password: password.value }),
+      body: JSON.stringify({
+        email: email.value,
+        password: password.value,
+      }),
     })
 
     if (!res.ok) {
@@ -57,14 +60,18 @@ const register = async () => {
       throw new Error(errText)
     }
 
-    message.value = "Registration successful!"
+    message.value = "Register successfully"
     successMessage.value = true
   } catch (err) {
-    message.value = "Erreur : " + err.message
-    successMessage.value = false
-  } finally {
-    loading.value = false
+  const rawMessage = err.message
+
+  if (rawMessage.includes("users_email_key")) {
+    message.value = "Account already exists, please login."
+  } else {
+    message.value = "Error: " + rawMessage
   }
+
+  successMessage.value = false
+}
 }
 </script>
-

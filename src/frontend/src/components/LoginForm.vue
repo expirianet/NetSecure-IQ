@@ -1,45 +1,70 @@
 <template>
-  <div>
-    <h2>Login</h2>
-    <form @submit.prevent="login">
-      <input v-model="email" placeholder="Email" required />
-      <input v-model="password" type="password" placeholder="Password" required />
-      <button type="submit">Login</button>
-    </form>
-    <p v-if="message">{{ message }}</p>
+  <div class="login">
+    <div class="login-box">
+      <h3>Login to your account</h3>
+      <form @submit.prevent="login">
+        <input
+          v-model="email"
+          type="email"
+          placeholder="Email"
+          required
+        />
+        <input
+          v-model="password"
+          type="password"
+          placeholder="Password"
+          required
+        />
+        <button :disabled="loading" type="submit">
+          {{ loading ? "Loading..." : "Login" }}
+        </button>
+      </form>
+
+      <div class="link">
+        <span>Don't have an account?</span>
+        <router-link to="/register">Register</router-link>
+      </div>
+
+      <p v-if="message" :class="{ success: successMessage, error: !successMessage }">
+        {{ message }}
+      </p>
+    </div>
   </div>
 </template>
 
-<script>
-export default {
-  name: 'LoginForm',
-  data() {
-    return {
-      email: '',
-      password: '',
-      message: ''
-    }
-  },
-  methods: {
-    async login() {
-      try {
-        const res = await fetch('http://localhost:8000/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: this.email, password: this.password })
-        })
+<script setup>
+import { ref } from "vue"
+import { useRouter } from "vue-router"
 
-        const text = await res.text()
-        if (!res.ok) throw new Error(text)
-        
-        this.message = 'Login successful! Redirecting...'
-        setTimeout(() => {
-          this.$router.push('/dashboard')
-        }, 500) // or even 100ms works
-      } catch (err) {
-        this.message = 'Error: ' + err.message
-      }
-    }
+const email = ref("")
+const password = ref("")
+const message = ref("")
+const successMessage = ref(false)
+const loading = ref(false)
+const router = useRouter()
+
+const login = async () => {
+  loading.value = true
+  try {
+    const res = await fetch("http://localhost:8000/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.value, password: password.value }),
+    })
+
+    const text = await res.text()
+    if (!res.ok) throw new Error(text)
+
+    message.value = "Login successful! Redirecting..."
+    successMessage.value = true
+    setTimeout(() => {
+      router.push("/dashboard")
+    }, 500)
+  } catch (err) {
+    message.value = "Erreur : " + err.message
+    successMessage.value = false
+  } finally {
+    loading.value = false
   }
 }
 </script>
