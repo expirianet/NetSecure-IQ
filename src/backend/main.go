@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	_ "github.com/lib/pq"
+	"github.com/sethvargo/go-password/password"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -56,7 +57,13 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	generatedPassword, err := password.Generate(16, 4, 4, false, false)
+	if err != nil {
+		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
