@@ -1,77 +1,70 @@
 <template>
-  <div class="login">
-    <div class="login-box">
-      <h3>Register your account</h3>
-      <form @submit.prevent="register">
-        <input
-          v-model="email"
-          type="email"
-          placeholder="Email"
-          required
-        />
-        <input
-          v-model="password"
-          type="password"
-          placeholder="Password"
-          required
-        />
-
-        <button :disabled="loading" type="submit">
-          {{ loading ? "Loading..." : "Register" }}
-        </button>
-      </form>
-
-      <div class="link">
-        <span>Have already an account ?</span>
-        <router-link to="/login">Login</router-link>
+  <div class="register-form">
+    <h2>Register</h2>
+    <form @submit.prevent="register">
+      <div>
+        <label for="email">Email:</label>
+        <input v-model="email" type="email" required />
       </div>
 
-      <p v-if="message" :class="{ success: successMessage, error: !successMessage }">
-        {{ message }}
-      </p>
-    </div>
+      <button type="submit">Register</button>
+    </form>
+
+    <p v-if="message">{{ message }}</p>
+    <p v-if="error" class="error">{{ error }}</p>
   </div>
 </template>
 
-<script setup>
-import { ref } from "vue"
-
-const email = ref("")
-const password = ref("")
-
-const message = ref("")
-const successMessage = ref(false)
-const loading = ref(false)
-
-const register = async () => {
-  loading.value = true
-  try {
-    const res = await fetch("http://localhost:8000/api/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: email.value,
-        password: password.value,
-      }),
-    })
-
-    if (!res.ok) {
-      const errText = await res.text()
-      throw new Error(errText)
+<script>
+export default {
+  data() {
+    return {
+      email: '',
+      message: '',
+      error: ''
     }
+  },
+  methods: {
+    async register() {
+      this.error = ''
+      this.message = ''
 
-    message.value = "Register successfully"
-    successMessage.value = true
-  } catch (err) {
-  const rawMessage = err.message
+      try {
+        const res = await fetch('http://localhost:8080/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.email })
+        })
 
-  if (rawMessage.includes("users_email_key")) {
-    message.value = "Account already exists, please login."
-  } else {
-    message.value = "Error: " + rawMessage
+        const data = await res.json()
+
+        if (!res.ok) {
+          throw new Error(data.error || data.message || 'Registration failed')
+        }
+
+        this.message = data.message || 'Registration successful. Check your email.'
+        this.email = ''
+
+        // optional: redirect to login after delay
+        setTimeout(() => {
+          this.$router.push('/login') // or '/verify'
+        }, 3000)
+
+      } catch (err) {
+        this.error = err.message
+      }
+    }
   }
-
-  successMessage.value = false
-}
 }
 </script>
+
+<style scoped>
+.register-form {
+  max-width: 400px;
+  margin: auto;
+}
+
+.error {
+  color: red;
+}
+</style>

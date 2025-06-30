@@ -6,20 +6,25 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"gopkg.in/gomail.v2"
 
 	_ "github.com/lib/pq"
 	"github.com/sethvargo/go-password/password"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/gomail.v2"
 )
 
+var db *sql.DB
+
+// Separate struct for registration
 type RegisterRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
+	Email string `json:"email"`
 }
 
-var db *sql.DB
+// Separate struct for login
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
 
 func main() {
 	var err error
@@ -48,47 +53,55 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Email == "" || req.Password == "" || req.Role == "" {
-		http.Error(w, "Email, password, and role required", http.StatusBadRequest)
+	if req.Email == "" {
+		http.Error(w, "Email is required", http.StatusBadRequest)
 		return
 	}
 
-	if req.Role != "admin" && req.Role != "tenant" {
-		http.Error(w, "Role must be 'admin' or 'tenant'", http.StatusBadRequest)
-		return
-	}
-
+	// Generate a random secure password
 	generatedPassword, err := password.Generate(16, 4, 4, false, false)
 	if err != nil {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
 
+	// Hash the generated password
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
-	_, err = db.Exec(`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)`, req.Email, string(hash), req.Role)
+	// Save user to DB with default role
+	defaultRole := "tenant"
+	_, err = db.Exec(`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)`, req.Email, string(hash), defaultRole)
 	if err != nil {
 		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"message": "User registered successfully"})
-
-	// inside handleRegister after generating password:
+	// Send email with temporary password
 	m := gomail.NewMessage()
 	m.SetHeader("From", "noreply@yourdomain.com")
 	m.SetHeader("To", req.Email)
-	m.SetHeader("Subject", "Your temporary password")
-	m.SetBody("text/plain", fmt.Sprintf("Your temporary password: %s", generatedPassword))
+	m.SetHeader("Subject", "Your NetSecure IQ Access")
+	m.SetBody("text/plain", fmt.Sprintf(`Hello,
 
-	d := gomail.NewDialer("smtp.yourdomain.com", 587, "user", "pass")
+Welcome to NetSecure IQ!
+Your temporary password is:
+
+%s
+
+Please log in and complete your profile.
+
+– NetSecure IQ Team`, generatedPassword))
+
+	d := gomail.NewDialer("smtp.yourdomain.com", 587, "user", "pass") // <- replace these
 	if err := d.DialAndSend(m); err != nil {
 		log.Println("Failed to send email:", err)
 	}
+
+	json.NewEncoder(w).Encode(map[string]string{"message": "User registered successfully. Check your email."})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +110,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req RegisterRequest
+	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
