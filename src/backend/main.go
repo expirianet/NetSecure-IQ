@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"gopkg.in/gomail.v2"
 
 	_ "github.com/lib/pq"
 	"github.com/sethvargo/go-password/password"
@@ -76,6 +77,18 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"message": "User registered successfully"})
+
+	// inside handleRegister after generating password:
+	m := gomail.NewMessage()
+	m.SetHeader("From", "noreply@yourdomain.com")
+	m.SetHeader("To", req.Email)
+	m.SetHeader("Subject", "Your temporary password")
+	m.SetBody("text/plain", fmt.Sprintf("Your temporary password: %s", generatedPassword))
+
+	d := gomail.NewDialer("smtp.yourdomain.com", 587, "user", "pass")
+	if err := d.DialAndSend(m); err != nil {
+		log.Println("Failed to send email:", err)
+	}
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
