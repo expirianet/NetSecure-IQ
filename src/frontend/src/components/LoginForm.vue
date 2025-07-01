@@ -46,7 +46,7 @@ const router = useRouter()
 const login = async () => {
   loading.value = true
   try {
-    const res = await fetch("http://localhost:8000/api/login", {
+    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.value, password: password.value }),

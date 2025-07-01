@@ -28,11 +28,18 @@ type LoginRequest struct {
 
 func main() {
 	var err error
-	connStr := "host=localhost user=postgres password=your_secure_password dbname=your_db sslmode=disable"
+	connStr := "host=postgresql user=netsecure_iq password=your_secure_password dbname=netsecure_iq_db sslmode=disable"
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatal("Failed to connect to DB:", err)
 	}
+
+	// ✅ Test connection to the database
+	err = db.Ping()
+	if err != nil {
+		log.Fatal("Database connection test failed:", err)
+	}
+	fmt.Println("✅ Connected to PostgreSQL successfully")
 
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
@@ -73,16 +80,20 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save user to DB with default role
-	defaultRole := "tenant"
-	_, err = db.Exec(`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)`, req.Email, string(hash), defaultRole)
+	//defaultRole := "tenant"
+	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 3)
+
 	if err != nil {
-		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Database insert failed: " + err.Error(),
+		})
 		return
 	}
 
 	// Send email with temporary password
 	m := gomail.NewMessage()
-	m.SetHeader("From", "noreply@yourdomain.com")
+	m.SetHeader("From", "NetSecure IQ <noreply@netsecure.test>")
 	m.SetHeader("To", req.Email)
 	m.SetHeader("Subject", "Your NetSecure IQ Access")
 	m.SetBody("text/plain", fmt.Sprintf(`Hello,
@@ -96,12 +107,19 @@ Please log in and complete your profile.
 
 – NetSecure IQ Team`, generatedPassword))
 
-	d := gomail.NewDialer("smtp.yourdomain.com", 587, "user", "pass") // <- replace these
+	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "f8a85b7da3ad77", "8dfd2cbb9ac6f2")
+
 	if err := d.DialAndSend(m); err != nil {
 		log.Println("Failed to send email:", err)
+		// Optional: return error to client if needed
+		// http.Error(w, "User created, but failed to send email", http.StatusInternalServerError)
+		// return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"message": "User registered successfully. Check your email."})
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "User registered successfully. Check your email.",
+	})
+
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +134,14 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hash, role string
-	err := db.QueryRow(`SELECT password_hash, role FROM users WHERE email = $1`, req.Email).Scan(&hash, &role)
+	var hash, roleName string
+	err := db.QueryRow(`
+		SELECT u.password_hash, r.name
+		FROM users u
+		JOIN roles r ON u.role_id = r.id
+		WHERE u.email = $1
+	`, req.Email).Scan(&hash, &roleName)
+
 	if err == sql.ErrNoRows {
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 		return
@@ -131,7 +155,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if role == "admin" {
+	if roleName == "admin" {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Login successful admin"})
 	} else {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Login successful user"})

@@ -30,7 +30,7 @@ export default {
       this.message = ''
 
       try {
-        const res = await fetch('http://localhost:8080/api/register', {
+        const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: this.email })
