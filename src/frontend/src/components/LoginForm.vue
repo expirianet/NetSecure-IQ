@@ -60,6 +60,8 @@ const login = async () => {
 
     message.value = "Login successful! Redirecting..."
     successMessage.value = true
+    
+    localStorage.setItem("user_id", data.user_id)
 
     // ✅ Check if it's an operator with no organization_id
     if (data.role?.toLowerCase() === "operator" && !data.organization_id) {

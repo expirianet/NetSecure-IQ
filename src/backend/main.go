@@ -26,6 +26,15 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type OrganizationRequest struct {
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	VATNumber    string `json:"vat_number"`
+	ContactEmail string `json:"contact_email"`
+	ContactPhone string `json:"contact_phone"`
+	UserID       string `json:"user_id"`
+}
+
 func main() {
 	var err error
 	connStr := "host=postgresql user=netsecure_iq password=your_secure_password dbname=netsecure_iq_db sslmode=disable"
@@ -43,6 +52,7 @@ func main() {
 
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
+	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -170,6 +180,44 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req OrganizationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	// Insert new organization
+	var orgID string
+	err := db.QueryRow(`
+		INSERT INTO organizations (name, address, vat_number, contact_email, contact_phone, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now(), now())
+		RETURNING id
+	`, req.Name, req.Address, req.VATNumber, req.ContactEmail, req.ContactPhone).Scan(&orgID)
+
+	if err != nil {
+		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update user with organization_id
+	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
+	if err != nil {
+		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":         "Organization created and linked successfully",
+		"organization_id": orgID,
+	})
 }
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {

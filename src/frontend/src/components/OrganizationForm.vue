@@ -57,20 +57,42 @@ const goToDashboard = () => {
   router.push('/dashboard')
 }
 
-const submitForm = () => {
+const submitForm = async () => {
   if (!form.name || !form.address) {
     message.value = "Please fill in all required fields."
     return
   }
 
-  console.log("Submitted Organization Info:", { ...form })
-  message.value = "Organization info submitted! Redirecting..."
+  try {
+    const response = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/complete-organization`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...form,
+        user_id: localStorage.getItem("user_id") // assumes user ID is stored there after login
+      }),
+    })
 
-  // Later replace with a POST call here
-  setTimeout(() => {
-    router.push('/dashboard')
-  }, 1000)
+    let responseText = await response.text()
+
+    let data
+    try {
+        data = JSON.parse(responseText)
+    } catch {
+        throw new Error(responseText)
+    }
+
+    if (!response.ok) throw new Error(data.error || data.message)
+
+    message.value = "Organization info submitted! Redirecting..."
+    setTimeout(() => {
+      router.push('/dashboard')
+    }, 1000)
+  } catch (err) {
+    message.value = "Submission failed: " + err.message
+  }
 }
+
 </script>
 
 <style scoped>
