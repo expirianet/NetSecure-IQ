@@ -81,7 +81,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Save user to DB with default role
 	//defaultRole := "tenant"
-	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 3)
+	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -135,12 +135,13 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var hash, roleName string
+	var userID, orgID sql.NullString
 	err := db.QueryRow(`
-		SELECT u.password_hash, r.name
+		SELECT u.id, u.password_hash, r.name, u.organization_id
 		FROM users u
 		JOIN roles r ON u.role_id = r.id
 		WHERE u.email = $1
-	`, req.Email).Scan(&hash, &roleName)
+	`, req.Email).Scan(&userID, &hash, &roleName, &orgID)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
@@ -155,11 +156,20 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if roleName == "admin" {
-		json.NewEncoder(w).Encode(map[string]string{"message": "Login successful admin"})
-	} else {
-		json.NewEncoder(w).Encode(map[string]string{"message": "Login successful user"})
+	// respond with login result
+	resp := map[string]interface{}{
+		"message": "Login successful",
+		"role":    roleName,
+		"user_id": userID.String,
 	}
+
+	if orgID.Valid {
+		resp["organization_id"] = orgID.String
+	} else {
+		resp["organization_id"] = nil
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {

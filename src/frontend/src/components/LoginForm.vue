@@ -52,14 +52,25 @@ const login = async () => {
       body: JSON.stringify({ email: email.value, password: password.value }),
     })
 
-    const text = await res.text()
-    if (!res.ok) throw new Error(text)
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data.error || data.message || "Login failed")
+    }
 
     message.value = "Login successful! Redirecting..."
     successMessage.value = true
-    setTimeout(() => {
-      router.push("/dashboard")
-    }, 500)
+
+    // ✅ Check if it's an operator with no organization_id
+    if (data.role?.toLowerCase() === "operator" && !data.organization_id) {
+      setTimeout(() => {
+        router.push("/organizationForm")
+      }, 500)
+    } else {
+      setTimeout(() => {
+        router.push("/dashboard")
+      }, 500)
+    }
   } catch (err) {
     message.value = "Erreur : " + err.message
     successMessage.value = false
@@ -68,3 +79,4 @@ const login = async () => {
   }
 }
 </script>
+
