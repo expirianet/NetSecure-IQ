@@ -40,6 +40,7 @@ services:
       POSTGRES_DB: netsecure_iq_db
       INFLUXDB_HOST: influxdb
       INFLUXDB_PORT: 8086
+      JWT_SECRET: your_super_secret_key_change_me
     depends_on:
       - postgresql
       - influxdb
