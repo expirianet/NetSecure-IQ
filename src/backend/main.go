@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 	"github.com/sethvargo/go-password/password"
 	"golang.org/x/crypto/bcrypt"
@@ -14,6 +18,8 @@ import (
 )
 
 var db *sql.DB
+
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 // Separate struct for registration
 type RegisterRequest struct {
@@ -37,13 +43,28 @@ type OrganizationRequest struct {
 
 func main() {
 	var err error
-	connStr := "host=postgresql user=netsecure_iq password=your_secure_password dbname=netsecure_iq_db sslmode=disable"
+
+	// Récupérer les infos de connexion depuis les variables d'environnement
+	host := os.Getenv("POSTGRES_HOST")
+	user := os.Getenv("POSTGRES_USER")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	dbname := os.Getenv("POSTGRES_DB")
+
+	if host == "" || user == "" || password == "" || dbname == "" {
+		log.Fatal("One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
+	}
+
+	if len(jwtSecret) == 0 {
+		log.Fatal("JWT_SECRET environment variable is not set")
+	}
+
+	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatal("Failed to connect to DB:", err)
 	}
 
-	// ✅ Test connection to the database
+	// Test connection to the database
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("Database connection test failed:", err)
@@ -52,6 +73,8 @@ func main() {
 
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
+	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
+	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 
 	fmt.Println("Server started at http://localhost:8080")
@@ -89,8 +112,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save user to DB with default role
-	//defaultRole := "tenant"
+	// Save user to DB with default role_id = 3 (ex: tenant)
 	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 
 	if err != nil {
@@ -121,15 +143,11 @@ Please log in and complete your profile.
 
 	if err := d.DialAndSend(m); err != nil {
 		log.Println("Failed to send email:", err)
-		// Optional: return error to client if needed
-		// http.Error(w, "User created, but failed to send email", http.StatusInternalServerError)
-		// return
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "User registered successfully. Check your email.",
 	})
-
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -166,20 +184,117 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// respond with login result
-	resp := map[string]interface{}{
-		"message": "Login successful",
+	// Génération du token JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email":   req.Email,
 		"role":    roleName,
-		"user_id": userID.String,
+		"exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Expire dans 24h
+		"user_id": orgReq.UserID,
+	})
+
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
 	}
 
-	if orgID.Valid {
-		resp["organization_id"] = orgID.String
-	} else {
-		resp["organization_id"] = nil
+	// Réponse JSON avec le token
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Login successful",
+		"token":   tokenString,
+	})
+}
+
+func withCORS(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h(w, r)
+	}
+}
+
+func handleProtected(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+		return
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	json.NewEncoder(w).Encode(claims)
+}
+
+func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		const prefix = "Bearer "
+		if len(authHeader) <= len(prefix) || authHeader[:len(prefix)] != prefix {
+			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := authHeader[len(prefix):]
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		// Optionnel : tu peux récupérer les claims ici et les passer dans le contexte
+
+		next(w, r)
+	}
+}
+
+func handleRouters(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Exemple statique — à remplacer par une vraie requête en base si besoin
+	routers := []map[string]interface{}{
+		{"mac": "00:11:22:33:44:55", "value": "online", "time": time.Now().Format(time.RFC3339)},
+		{"mac": "66:77:88:99:AA:BB", "value": "offline", "time": time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(routers)
 }
 
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
@@ -218,16 +333,4 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
-}
-
-func withCORS(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		h(w, r)
-	}
 }
