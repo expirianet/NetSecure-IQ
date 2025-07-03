@@ -32,6 +32,17 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type OrganizationRequest struct {
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	VATNumber    string `json:"vat_number"`
+	ContactEmail string `json:"contact_email"`
+	ContactPhone string `json:"contact_phone"`
+	UserID       string `json:"user_id"`
+}
+
+var orgReq OrganizationRequest
+
 func main() {
 	var err error
 
@@ -66,6 +77,7 @@ func main() {
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
+	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 
 	fmt.Println("Server started at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -103,7 +115,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save user to DB with default role_id = 3 (ex: tenant)
-	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 3)
+	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -175,9 +187,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Génération du token JWT
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email": req.Email,
-		"role":  roleName,
-		"exp":   jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Expire dans 24h
+		"email":   req.Email,
+		"role":    roleName,
+		"exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Expire dans 24h
+		"user_id": orgReq.UserID,
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
@@ -283,4 +296,42 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(routers)
+}
+
+func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req OrganizationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	// Insert new organization
+	var orgID string
+	err := db.QueryRow(`
+		INSERT INTO organizations (name, address, vat_number, contact_email, contact_phone, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now(), now())
+		RETURNING id
+	`, req.Name, req.Address, req.VATNumber, req.ContactEmail, req.ContactPhone).Scan(&orgID)
+
+	if err != nil {
+		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update user with organization_id
+	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
+	if err != nil {
+		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":         "Organization created and linked successfully",
+		"organization_id": orgID,
+	})
 }
