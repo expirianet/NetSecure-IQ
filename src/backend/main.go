@@ -18,15 +18,12 @@ import (
 )
 
 var db *sql.DB
-
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
-// Separate struct for registration
 type RegisterRequest struct {
 	Email string `json:"email"`
 }
 
-// Separate struct for login
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -41,37 +38,33 @@ type OrganizationRequest struct {
 	UserID       string `json:"user_id"`
 }
 
-var org OrganizationRequest
+//var org OrganizationRequest
 
 func main() {
 	var err error
 
-	// Récupérer les infos de connexion depuis les variables d'environnement
 	host := os.Getenv("POSTGRES_HOST")
 	user := os.Getenv("POSTGRES_USER")
 	password := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 
 	if host == "" || user == "" || password == "" || dbname == "" {
-		log.Fatal("One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
+		log.Println("⚠️ One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
+	} else {
+		connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
+		db, err = sql.Open("postgres", connStr)
+		if err != nil {
+			log.Println("❌ Failed to open DB connection:", err)
+		} else if err = db.Ping(); err != nil {
+			log.Println("❌ Database connection test failed:", err)
+		} else {
+			fmt.Println("✅ Connected to PostgreSQL successfully")
+		}
 	}
 
 	if len(jwtSecret) == 0 {
-		log.Fatal("JWT_SECRET environment variable is not set")
+		log.Println("⚠️ JWT_SECRET environment variable is not set — JWT will not work properly")
 	}
-
-	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
-	db, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatal("Failed to connect to DB:", err)
-	}
-
-	// Test connection to the database
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Database connection test failed:", err)
-	}
-	fmt.Println("✅ Connected to PostgreSQL successfully")
 
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
@@ -79,8 +72,33 @@ func main() {
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 
-	fmt.Println("Server started at http://localhost:8080")
+	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func withCORS(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		allowedOrigins := []string{
+			"http://localhost:8080",
+			"http://localhost:8081",
+		}
+
+		for _, o := range allowedOrigins {
+			if origin == o {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -94,29 +112,23 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
 	if req.Email == "" {
 		http.Error(w, "Email is required", http.StatusBadRequest)
 		return
 	}
 
-	// Generate a random secure password
 	generatedPassword, err := password.Generate(16, 4, 4, false, false)
 	if err != nil {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
-
-	// Hash the generated password
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
-	// Save user to DB with default role_id = 3 (ex: tenant)
 	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
-
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -125,7 +137,6 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send email with temporary password
 	m := gomail.NewMessage()
 	m.SetHeader("From", "NetSecure IQ <noreply@netsecure.test>")
 	m.SetHeader("To", req.Email)
@@ -142,7 +153,6 @@ Please log in and complete your profile.
 – NetSecure IQ Team`, generatedPassword))
 
 	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "f8a85b7da3ad77", "8dfd2cbb9ac6f2")
-
 	if err := d.DialAndSend(m); err != nil {
 		log.Println("Failed to send email:", err)
 	}
@@ -173,7 +183,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		WHERE u.email = $1
 	`, req.Email).Scan(&userID, &hash, &roleName, &orgID)
 
-	if err == sql.ErrNoRows {
+	if err == sql.ErrNoRows || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 		return
 	} else if err != nil {
@@ -181,43 +191,33 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
-		return
-	}
-
-	// Génération du token JWT
+	// Create JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"email":   req.Email,
 		"role":    roleName,
-		"exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Expire dans 24h
-		"user_id": org.UserID,
+		"user_id": userID.String,
+		"exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 	})
-
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
 	}
 
-	// Réponse JSON avec le token
-	json.NewEncoder(w).Encode(map[string]string{
+	// Final response
+	resp := map[string]interface{}{
 		"message": "Login successful",
 		"token":   tokenString,
-	})
-}
-
-func withCORS(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		h(w, r)
+		"role":    roleName,
+		"user_id": userID.String,
 	}
+	if orgID.Valid {
+		resp["organization_id"] = orgID.String
+	} else {
+		resp["organization_id"] = nil
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +234,6 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
@@ -245,7 +244,6 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
-
 	json.NewEncoder(w).Encode(claims)
 }
 
@@ -271,13 +269,10 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 			return jwtSecret, nil
 		})
-
 		if err != nil || !token.Valid {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-
-		// Optionnel : tu peux récupérer les claims ici et les passer dans le contexte
 
 		next(w, r)
 	}
@@ -289,7 +284,6 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exemple statique — à remplacer par une vraie requête en base si besoin
 	routers := []map[string]interface{}{
 		{"mac": "00:11:22:33:44:55", "value": "online", "time": time.Now().Format(time.RFC3339)},
 		{"mac": "66:77:88:99:AA:BB", "value": "offline", "time": time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
@@ -311,7 +305,6 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert new organization
 	var orgID string
 	err := db.QueryRow(`
 		INSERT INTO organizations (name, address, vat_number, contact_email, contact_phone, created_at, updated_at)
@@ -324,7 +317,6 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update user with organization_id
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
 	if err != nil {
 		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
