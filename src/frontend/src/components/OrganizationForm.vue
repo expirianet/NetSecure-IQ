@@ -1,31 +1,53 @@
 <template>
   <div class="organization-form">
-    <h2>Complete Your Organization Info</h2>
+    <h2>Register Your Organization</h2>
     <form @submit.prevent="submitForm">
-      <div>
-        <label for="name">Organization Name:</label>
-        <input v-model="form.name" type="text" id="name" required />
-      </div>
 
-      <div>
-        <label for="address">Address:</label>
-        <input v-model="form.address" type="text" id="address" required />
-      </div>
+      <!-- Section: Organization -->
+      <fieldset>
+        <legend>Organization Info</legend>
+        <input v-model="form.name" placeholder="Organization Name" required />
+        <input v-model="form.vat_number" placeholder="VAT Number or Fiscal Code" required />
+        <input v-model="form.address" placeholder="Address" required />
+        <input v-model="form.state" placeholder="State" required />
+        <input v-model="form.city" placeholder="City" required />
+        <input v-model="form.zip_code" placeholder="ZIP Code" required />
+        <input v-model="form.email" placeholder="Email" type="email" required />
+        <input v-model="form.pec" placeholder="PEC Email" />
+        <input v-model="form.sdi" placeholder="SDI Code" />
+        <input v-model="form.phone" placeholder="Phone Number" required />
+      </fieldset>
 
-      <div>
-        <label for="vat">VAT Number:</label>
-        <input v-model="form.vat_number" type="text" id="vat" />
-      </div>
+      <!-- Section: Company Manager -->
+      <fieldset>
+        <legend>Company Manager</legend>
+        <input v-model="form.manager_name" placeholder="Name and Surname" required />
+        <input v-model="form.manager_email" placeholder="Email" type="email" required />
+        <input v-model="form.manager_phone" placeholder="Phone Number" required />
+      </fieldset>
 
-      <div>
-        <label for="contact_email">Contact Email:</label>
-        <input v-model="form.contact_email" type="email" id="contact_email" />
-      </div>
+      <!-- Section: Technical Manager -->
+      <fieldset>
+        <legend>Technical Manager</legend>
+        <input v-model="form.technical_name" placeholder="Name and Surname" required />
+        <input v-model="form.technical_email" placeholder="Email" type="email" required />
+        <input v-model="form.technical_phone" placeholder="Phone Number" required />
+      </fieldset>
 
-      <div>
-        <label for="contact_phone">Contact Phone:</label>
-        <input v-model="form.contact_phone" type="tel" id="contact_phone" />
-      </div>
+      <!-- Section: GDPR / NIS2 -->
+      <fieldset>
+        <legend>Privacy – GDPR – NIS2</legend>
+
+        <label>Data Controller</label>
+        <input v-model="form.controller_name" placeholder="Name and Surname" required />
+        <input v-model="form.controller_email" placeholder="Email" type="email" required />
+        <input v-model="form.controller_phone" placeholder="Phone Number" required />
+
+        <label>Data Processor</label>
+        <input v-model="form.processor_name" placeholder="Name and Surname" required />
+        <input v-model="form.processor_email" placeholder="Email" type="email" required />
+        <input v-model="form.processor_phone" placeholder="Phone Number" required />
+      </fieldset>
 
       <div class="buttons">
         <button type="submit">Submit</button>
@@ -42,23 +64,27 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const message = ref('')
 
 const form = reactive({
-  name: '',
-  address: '',
-  vat_number: '',
-  contact_email: '',
-  contact_phone: ''
+  // Org
+  name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
+  email: '', pec: '', sdi: '', phone: '',
+  // Manager
+  manager_name: '', manager_email: '', manager_phone: '',
+  // Technical
+  technical_name: '', technical_email: '', technical_phone: '',
+  // GDPR
+  controller_name: '', controller_email: '', controller_phone: '',
+  processor_name: '', processor_email: '', processor_phone: ''
 })
-
-const message = ref('')
 
 const goToDashboard = () => {
   router.push('/dashboard')
 }
 
 const submitForm = async () => {
-  if (!form.name || !form.address) {
+  if (!form.name || !form.vat_number || !form.address || !form.email || !form.manager_name) {
     message.value = "Please fill in all required fields."
     return
   }
@@ -69,17 +95,16 @@ const submitForm = async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        user_id: localStorage.getItem("user_id") // assumes user ID is stored there after login
+        user_id: localStorage.getItem("user_id")
       }),
     })
 
     let responseText = await response.text()
-
     let data
     try {
-        data = JSON.parse(responseText)
+      data = JSON.parse(responseText)
     } catch {
-        throw new Error(responseText)
+      throw new Error(responseText)
     }
 
     if (!response.ok) throw new Error(data.error || data.message)
@@ -88,28 +113,37 @@ const submitForm = async () => {
     setTimeout(() => {
       router.push('/dashboard')
     }, 1000)
+
   } catch (err) {
     message.value = "Submission failed: " + err.message
   }
 }
-
 </script>
 
 <style scoped>
 .organization-form {
-  max-width: 500px;
+  max-width: 800px;
   margin: auto;
+  padding: 20px;
 }
 
-.organization-form label {
-  display: block;
-  margin-top: 10px;
+fieldset {
+  margin-top: 20px;
+  padding: 10px 20px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
 }
 
-.organization-form input {
+legend {
+  font-weight: bold;
+  padding: 0 10px;
+}
+
+input {
   width: 100%;
   padding: 8px;
-  margin-top: 4px;
+  margin-top: 6px;
+  margin-bottom: 10px;
 }
 
 .buttons {
