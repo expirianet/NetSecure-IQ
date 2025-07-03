@@ -41,6 +41,8 @@ type OrganizationRequest struct {
 	UserID       string `json:"user_id"`
 }
 
+var org OrganizationRequest
+
 func main() {
 	var err error
 
@@ -189,7 +191,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		"email":   req.Email,
 		"role":    roleName,
 		"exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Expire dans 24h
-		"user_id": orgReq.UserID,
+		"user_id": org.UserID,
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
