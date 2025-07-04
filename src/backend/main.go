@@ -30,12 +30,18 @@ type LoginRequest struct {
 }
 
 type OrganizationRequest struct {
-	Name         string `json:"name"`
-	Address      string `json:"address"`
-	VATNumber    string `json:"vat_number"`
-	ContactEmail string `json:"contact_email"`
-	ContactPhone string `json:"contact_phone"`
-	UserID       string `json:"user_id"`
+	Name          string `json:"name"`
+	Address       string `json:"address"`
+	VATNumber     string `json:"vat_number"`
+	State         string `json:"state"`
+	City          string `json:"city"`
+	ZipCode       string `json:"zip_code"`
+	ContactEmail  string `json:"contact_email"`
+	PecEmail      string `json:"pec_email"`
+	SdiCode       string `json:"sdi_code"`
+	ContactPhone  string `json:"contact_phone"`
+	PersonnelInfo string `json:"personnel_info"`
+	UserID        string `json:"user_id"`
 }
 
 //var org OrganizationRequest
@@ -305,12 +311,22 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("📥 Received OrganizationRequest:\n%+v\n", req)
+
 	var orgID string
 	err := db.QueryRow(`
-		INSERT INTO organizations (name, address, vat_number, contact_email, contact_phone, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now(), now())
+		INSERT INTO organizations (
+			name, address, vat_number, state, city, zip_code,
+			contact_email, pec_email, sdi_code, contact_phone,
+			personnel_info, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6,
+				$7, $8, $9, $10,
+				$11, now(), now())
 		RETURNING id
-	`, req.Name, req.Address, req.VATNumber, req.ContactEmail, req.ContactPhone).Scan(&orgID)
+	`, req.Name, req.Address, req.VATNumber, req.State, req.City, req.ZipCode,
+		req.ContactEmail, req.PecEmail, req.SdiCode, req.ContactPhone,
+		req.PersonnelInfo).Scan(&orgID)
 
 	if err != nil {
 		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
@@ -318,6 +334,7 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
+
 	if err != nil {
 		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
 		return
