@@ -1,19 +1,21 @@
 <template>
   <div>
-    <h2>Router Table</h2>
-    <table v-if="Array.isArray(routers) && routers.length">
+    <h2 style="margin-bottom: 1rem;">Router Status Table</h2>
+    <table class="router-table" v-if="Array.isArray(routers) && routers.length">
       <thead>
         <tr>
-          <th>MAC</th>
+          <th>#</th>
+          <th>MAC Address</th>
           <th>Status</th>
-          <th>Time</th>
+          <th>Timestamp</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="router in routers" :key="router.mac">
+        <tr v-for="(router, index) in routers" :key="router.mac">
+          <td>{{ index + 1 }}</td>
           <td>{{ router.mac }}</td>
-          <td>{{ router.value }}</td>
-          <td>{{ router.time }}</td>
+          <td :class="router.status === 'online' ? 'online' : 'offline'">{{ router.status }}</td>
+          <td>{{ formatDate(router.time) }}</td>
         </tr>
       </tbody>
     </table>
@@ -25,6 +27,11 @@
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
+
+function formatDate(isoString) {
+  const date = new Date(isoString)
+  return date.toLocaleString()
+}
 
 onMounted(async () => {
   const token = localStorage.getItem("token")
@@ -44,8 +51,6 @@ onMounted(async () => {
     })
 
     const text = await response.text()
-    console.log("📥 Raw router response:", text)
-
     if (!response.ok) {
       console.error("❌ Error response:", text)
       throw new Error(text)
@@ -59,7 +64,11 @@ onMounted(async () => {
       return
     }
 
-    routers.value = data
+    routers.value = data.map(entry => ({
+      mac: entry.mac,
+      status: entry.value,
+      time: entry.time
+    }))
   } catch (err) {
     console.error("❌ Error loading router status:", err.message)
     routers.value = []
@@ -68,23 +77,35 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-table {
+.router-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 1rem;
+  font-family: Arial, sans-serif;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-th, td {
+.router-table th,
+.router-table td {
+  padding: 12px 16px;
   border: 1px solid #ccc;
-  padding: 8px 12px;
   text-align: left;
 }
 
-th {
+.router-table th {
   background-color: #f4f4f4;
 }
 
-tr:hover {
+.router-table tr:hover {
   background-color: #f9f9f9;
+}
+
+.online {
+  color: green;
+  font-weight: bold;
+}
+
+.offline {
+  color: red;
+  font-weight: bold;
 }
 </style>
