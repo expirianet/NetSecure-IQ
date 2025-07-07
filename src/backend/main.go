@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
@@ -44,6 +47,18 @@ type OrganizationRequest struct {
 	UserID        string `json:"user_id"`
 }
 
+type RouterStatus struct {
+	MAC   string `json:"mac"`
+	Value string `json:"value"`
+	Time  string `json:"time"`
+}
+
+type MikroTikData struct {
+	MAC    string `json:"mac"`
+	Status string `json:"status"` // "online", "offline", etc.
+}
+
+
 //var org OrganizationRequest
 
 func main() {
@@ -74,6 +89,7 @@ func main() {
 
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
+	http.HandleFunc("/api/ping", withCORS(handlePing))
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
@@ -226,6 +242,46 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data MikroTikData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("📡 Ping received: %+v\n", data)
+
+	const (
+		token  = "my-token"
+		bucket = "netsecure"
+		org    = "netsecure-org"
+		url    = "http://influxdb:8086"
+	)
+
+	client := influxdb2.NewClient(url, token)
+	defer client.Close()
+
+	writeAPI := client.WriteAPIBlocking(org, bucket)
+
+	p := influxdb2.NewPointWithMeasurement("device_status").
+		AddTag("mac", data.MAC).
+		AddField("status", data.Status).
+		SetTime(time.Now())
+
+	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+
 func handleProtected(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -285,18 +341,53 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func handleRouters(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+	const (
+		token  = "my-token"
+		bucket = "netsecure"
+		org    = "netsecure-org"
+		url    = "http://influxdb:8086"
+	)
+
+	client := influxdb2.NewClient(url, token)
+	defer client.Close()
+
+	queryAPI := client.QueryAPI(org)
+	query := `
+		from(bucket: "netsecure")
+			|> range(start: -7d)
+			|> filter(fn: (r) => r._measurement == "device_status")
+			|> filter(fn: (r) => r._field == "status")
+			|> last()
+	`
+
+	result, err := queryAPI.Query(context.Background(), query)
+	if err != nil {
+		http.Error(w, "InfluxDB query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	routers := []map[string]interface{}{
-		{"mac": "00:11:22:33:44:55", "value": "online", "time": time.Now().Format(time.RFC3339)},
-		{"mac": "66:77:88:99:AA:BB", "value": "offline", "time": time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
+	var output []RouterStatus
+
+	for result.Next() {
+		record := result.Record()
+		mac := record.ValueByKey("mac")
+		if mac == nil {
+			continue
+		}
+		output = append(output, RouterStatus{
+			MAC:   fmt.Sprintf("%v", mac),
+			Value: fmt.Sprintf("%v", record.Value()),
+			Time:  record.Time().Format(time.RFC3339),
+		})
+	}
+
+	if result.Err() != nil {
+		http.Error(w, "Influx parse error: "+result.Err().Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(routers)
+	json.NewEncoder(w).Encode(output)
 }
 
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
