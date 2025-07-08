@@ -44,42 +44,49 @@ const loading = ref(false)
 const router = useRouter()
 
 const login = async () => {
-  loading.value = true
+  loading.value = true;
   try {
     const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.value, password: password.value }),
-    })
+    });
 
-    const data = await res.json()
+    const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.error || data.message || "Login failed")
+      throw new Error(data.error || data.message || "Login failed");
     }
 
-    message.value = "Login successful! Redirecting..."
-    successMessage.value = true
-    
-    localStorage.setItem("token", data.token)
-    localStorage.setItem("user_id", data.user_id)
+    message.value = "Login successful! Redirecting...";
+    successMessage.value = true;
 
-    // ✅ Check if it's an operator with no organization_id
-    if (data.role?.toLowerCase() === "operator" && !data.organization_id) {
-      setTimeout(() => {
-        router.push("/organizationForm")
-      }, 500)
-    } else {
-      setTimeout(() => {
-        router.push("/dashboard")
-      }, 500)
+    const role = data.role?.toLowerCase();
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user_id", data.user_id);
+    localStorage.setItem("role", role);
+    console.log("User role:", role);
+
+    // 🔁 Decide final redirect path
+    let redirectTo = "/dashboard";
+
+    if (role === "user") {
+      redirectTo = "/routertable";
+    } else if (role === "operator" && !data.organization_id) {
+      redirectTo = "/organizationForm";
     }
+
+    // ✅ Single final redirect
+    setTimeout(() => {
+      router.push(redirectTo);
+    }, 500);
+
   } catch (err) {
-    message.value = "Erreur : " + err.message
-    successMessage.value = false
+    message.value = "Error : " + err.message;
+    successMessage.value = false;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-}
+};
 </script>
 

@@ -1,17 +1,41 @@
 <template>
   <div>
-    <h1>Router Dashboard</h1>
-    <RouterTable />
+    <h1>Welcome to the Dashboard</h1>
+
+    <div v-if="isAdminOrOperator">
+      <button @click="goToRouterInfo">Router Info</button>
+      <button @click="addUser">Add User</button>
+      <button v-if="isAdmin" @click="addOperator">Add Operator</button>
+    </div>
   </div>
 </template>
 
 <script>
-import RouterTable from './RouterTable.vue'
-
 export default {
-  name: 'DashboardPage',
-  components: {
-    RouterTable
+  computed: {
+    role() {
+      return localStorage.getItem("role");
+    },
+    isAdmin() {
+      return this.role === "administrator";
+    },
+    isOperator() {
+      return this.role === "operator";
+    },
+    isAdminOrOperator() {
+      return this.isAdmin || this.isOperator;
+    }
+  },
+  methods: {
+    addUser() {
+      alert("Add User clicked");
+    },
+    addOperator() {
+      alert("Add Operator clicked");
+    },
+    goToRouterInfo() {
+      this.$router.push("/routertable");
+    }
   }
-}
+};
 </script>
