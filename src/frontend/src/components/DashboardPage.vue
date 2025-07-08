@@ -28,10 +28,10 @@ export default {
   },
   methods: {
     addUser() {
-      alert("Add User clicked");
+      this.$router.push("/adduser");
     },
     addOperator() {
-      alert("Add Operator clicked");
+      this.$router.push("/addoperator");
     },
     goToRouterInfo() {
       this.$router.push("/routertable");
