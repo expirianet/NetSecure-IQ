@@ -58,7 +58,6 @@ type MikroTikData struct {
 	Status string `json:"status"` // "online", "offline", etc.
 }
 
-
 //var org OrganizationRequest
 
 func main() {
@@ -174,7 +173,7 @@ Please log in and complete your profile.
 
 – NetSecure IQ Team`, generatedPassword))
 
-	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "f8a85b7da3ad77", "8dfd2cbb9ac6f2")
+	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "a7579402169dd8", "6644803192d28b")
 	if err := d.DialAndSend(m); err != nil {
 		log.Println("Failed to send email:", err)
 	}
@@ -280,7 +279,6 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
-
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
