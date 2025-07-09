@@ -4,13 +4,18 @@
 
     <form @submit.prevent="submitForm">
       <div>
-        <label>Email:</label>
-        <input v-model="email" type="email" required />
+        <label>First Name:</label>
+        <input v-model="firstName" type="text" required />
       </div>
 
       <div>
-        <label>Password:</label>
-        <input v-model="password" type="password" required />
+        <label>Last Name:</label>
+        <input v-model="lastName" type="text" required />
+      </div>
+
+      <div>
+        <label>Email:</label>
+        <input v-model="email" type="email" required />
       </div>
 
       <div v-if="isAdmin">
@@ -34,7 +39,8 @@ import { ref, onMounted } from "vue";
 export default {
   setup() {
     const email = ref("");
-    const password = ref("");
+    const firstName = ref("");
+    const lastName = ref("");
     const organizations = ref([]);
     const selectedOrg = ref(null);
     const message = ref("");
@@ -58,7 +64,8 @@ export default {
     const submitForm = async () => {
       const payload = {
         email: email.value,
-        password: password.value,
+        first_name: firstName.value,
+        last_name: lastName.value,
         organization_id: isAdmin ? selectedOrg.value : userOrgId,
       };
 
@@ -73,7 +80,7 @@ export default {
 
       const data = await res.json();
       if (res.ok) {
-        message.value = "✅ User created successfully!";
+        message.value = "✅ User created and password sent via email!";
       } else {
         message.value = "❌ Failed: " + (data.error || data.message);
       }
@@ -81,7 +88,8 @@ export default {
 
     return {
       email,
-      password,
+      firstName,
+      lastName,
       organizations,
       selectedOrg,
       submitForm,

@@ -58,6 +58,13 @@ type MikroTikData struct {
 	Status string `json:"status"` // "online", "offline", etc.
 }
 
+type CreateUserRequest struct {
+	Email          string  `json:"email"`
+	FirstName      string  `json:"first_name"`
+	LastName       string  `json:"last_name"`
+	OrganizationID *string `json:"organization_id"` // Nullable
+}
+
 //var org OrganizationRequest
 
 func main() {
@@ -92,6 +99,8 @@ func main() {
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
+	http.HandleFunc("/api/users", withCORS(jwtMiddleware(handleCreateUser)))
+
 
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -432,5 +441,70 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
+	})
+}
+
+func handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// Generate password and hash
+	generatedPassword, err := password.Generate(16, 4, 4, false, false)
+	if err != nil {
+		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert into DB
+	_, err = db.Exec(`
+		INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
+		VALUES ($1, $2, 3, $3, $4, $5, now(), now())
+	`, req.Email, string(hash), req.FirstName, req.LastName, req.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Send email
+	m := gomail.NewMessage()
+	m.SetHeader("From", "NetSecure IQ <noreply@netsecure.test>")
+	m.SetHeader("To", req.Email)
+	m.SetHeader("Subject", "Your NetSecure IQ Account")
+	m.SetBody("text/plain", fmt.Sprintf(`Hello %s,
+
+Your account has been created in NetSecure IQ.
+Login Email: %s
+Temporary Password: %s
+
+Please log in and change your password as soon as possible.
+
+– NetSecure IQ Team`, req.FirstName, req.Email, generatedPassword))
+
+	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "a7579402169dd8", "6644803192d28b")
+	if err := d.DialAndSend(m); err != nil {
+		log.Println("Failed to send email:", err)
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "User created and password emailed",
 	})
 }
