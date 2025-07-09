@@ -65,6 +65,7 @@ const login = async () => {
     localStorage.setItem("token", data.token);
     localStorage.setItem("user_id", data.user_id);
     localStorage.setItem("role", role);
+    localStorage.setItem("organization_id", data.organization_id || "");
     console.log("User role:", role);
 
     // 🔁 Decide final redirect path

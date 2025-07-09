@@ -5,6 +5,7 @@
     <div v-if="isAdminOrOperator">
       <button @click="goToRouterInfo">Router Info</button>
       <button @click="addUser">Add User</button>
+      <button v-if="needsOrganization" @click="goToOrganizationInfo">Organization info</button>
       <button v-if="isAdmin" @click="addOperator">Add Operator</button>
     </div>
   </div>
@@ -24,7 +25,13 @@ export default {
     },
     isAdminOrOperator() {
       return this.isAdmin || this.isOperator;
-    }
+    },
+    hasOrganization() {
+      return localStorage.getItem("organization_id") !== "";
+    },
+    needsOrganization() {
+      return this.isOperator && !this.hasOrganization;
+    } 
   },
   methods: {
     addUser() {
@@ -35,6 +42,9 @@ export default {
     },
     goToRouterInfo() {
       this.$router.push("/routertable");
+    },
+    goToOrganizationInfo() {
+      this.$router.push("/organizationForm");
     }
   }
 };
