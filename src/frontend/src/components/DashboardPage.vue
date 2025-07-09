@@ -4,7 +4,7 @@
 
     <div v-if="isAdminOrOperator">
       <button @click="goToRouterInfo">Router Info</button>
-      <button @click="addUser">Add User</button>
+      <button v-if="!needsOrganization" @click="addUser">Add User</button>
       <button v-if="needsOrganization" @click="goToOrganizationInfo">Organization info</button>
       <button v-if="isAdmin" @click="addOperator">Add Operator</button>
     </div>
