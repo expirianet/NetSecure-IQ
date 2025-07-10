@@ -9,9 +9,15 @@
       </div>
 
       <div>
-        <label>Password:</label>
-        <input v-model="password" type="password" required />
+        <label>First Name:</label>
+        <input v-model="firstName" type="text" required />
       </div>
+
+      <div>
+        <label>Last Name:</label>
+        <input v-model="lastName" type="text" required />
+      </div>
+
 
       <div>
         <label>Assign to Organization (optional):</label>
@@ -35,7 +41,8 @@ import { ref, onMounted } from "vue";
 export default {
   setup() {
     const email = ref("");
-    const password = ref("");
+    const firstName = ref("");
+    const lastName = ref("");
     const organizations = ref([]);
     const selectedOrg = ref("");
     const message = ref("");
@@ -53,8 +60,9 @@ export default {
     const submitForm = async () => {
       const payload = {
         email: email.value,
-        password: password.value,
-        role: "Operator", // fixed role
+        firstName: firstName.value,
+        lastName: lastName.value,
+        role: "operator", // fixed role
         organization_id: selectedOrg.value || null, // optional
       };
 
@@ -77,7 +85,8 @@ export default {
 
     return {
       email,
-      password,
+      firstName,
+      lastName,
       organizations,
       selectedOrg,
       submitForm,

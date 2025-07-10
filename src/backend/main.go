@@ -62,7 +62,8 @@ type CreateUserRequest struct {
 	Email          string  `json:"email"`
 	FirstName      string  `json:"first_name"`
 	LastName       string  `json:"last_name"`
-	OrganizationID *string `json:"organization_id"` // Nullable
+	OrganizationID *string `json:"organization_id"`
+	Role           string  `json:"role"` // <-- Add this field
 }
 
 //var org OrganizationRequest
@@ -100,7 +101,6 @@ func main() {
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(jwtMiddleware(handleCreateUser)))
-
 
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -461,23 +461,35 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate password and hash
+	// Determine role ID from string
+	var roleID int
+	switch req.Role {
+	case "admin":
+		roleID = 1
+	case "operator":
+		roleID = 2
+	default:
+		roleID = 3 // default to User
+	}
+
+	// Generate and hash password
 	generatedPassword, err := password.Generate(16, 4, 4, false, false)
 	if err != nil {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
-	// Insert into DB
+	// Insert user
 	_, err = db.Exec(`
-		INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
-		VALUES ($1, $2, 3, $3, $4, $5, now(), now())
-	`, req.Email, string(hash), req.FirstName, req.LastName, req.OrganizationID)
+    INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+  `, req.Email, string(hash), roleID, req.FirstName, req.LastName, req.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
@@ -493,11 +505,12 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 Your account has been created in NetSecure IQ.
 Login Email: %s
+Your role is: %s
 Temporary Password: %s
 
 Please log in and change your password as soon as possible.
 
-– NetSecure IQ Team`, req.FirstName, req.Email, generatedPassword))
+– NetSecure IQ Team`, req.FirstName, req.Email, req.Role, generatedPassword))
 
 	d := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, "a7579402169dd8", "6644803192d28b")
 	if err := d.DialAndSend(m); err != nil {
