@@ -100,7 +100,7 @@ func main() {
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
-	http.HandleFunc("/api/users", withCORS(jwtMiddleware(handleCreateUser)))
+	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -109,6 +109,7 @@ func main() {
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		fmt.Println("📦 Origin:", origin) // 👈 Add this line
 		allowedOrigins := []string{
 			"http://localhost:8080",
 			"http://localhost:8081",
