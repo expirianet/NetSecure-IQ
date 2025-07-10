@@ -6,7 +6,7 @@
       <button @click="goToRouterInfo">Router Info</button>
       <button v-if="!needsOrganization" @click="addUser">Add User</button>
       <button v-if="needsOrganization" @click="goToOrganizationInfo">Organization info</button>
-      <button v-if="isAdmin" @click="addOperator">Add Operator</button>
+      <button v-if="canAddOperator" @click="addOperator">Add Operator</button>
     </div>
   </div>
 </template>
@@ -23,8 +23,14 @@ export default {
     isOperator() {
       return this.role === "operator";
     },
+    isUser() {
+      return this.role === "user";
+    },
     isAdminOrOperator() {
       return this.isAdmin || this.isOperator;
+    },
+    canAddOperator() {
+      return this.isAdmin || (this.isOperator && this.hasOrganization);
     },
     hasOrganization() {
       return localStorage.getItem("organization_id") !== "";
