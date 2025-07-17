@@ -110,6 +110,7 @@ func main() {
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
+	http.HandleFunc("/api/data/mikrotik-all", withCORS(jwtMiddleware(handleAllMetrics)))
 
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -532,4 +533,115 @@ Please log in and change your password as soon as possible.
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "User created and password emailed",
 	})
+}
+
+func writeMikrotikMetrics(client influxdb2.Client, data map[string]interface{}) error {
+	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+
+	point := influxdb2.NewPointWithMeasurement("mikrotik_metrics").
+		AddTag("mikrotik_id", data["mikrotik_id"].(string)).
+		AddTag("site_id", data["site_id"].(string)).
+		AddTag("organization_id", data["organization_id"].(string)).
+		AddTag("model", data["model"].(string)).
+		AddField("cpu_usage", data["cpu_usage"]).
+		AddField("memory_usage", data["memory_usage"]).
+		AddField("uptime_seconds", data["uptime_seconds"]).
+		AddField("rx_total_bytes", data["rx_total_bytes"]).
+		AddField("tx_total_bytes", data["tx_total_bytes"]).
+		AddField("online_status", data["online_status"]).
+		SetTime(time.Now())
+
+	return writeAPI.WritePoint(context.Background(), point)
+}
+
+func writeDeviceStatus(client influxdb2.Client, data map[string]interface{}) error {
+	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+
+	point := influxdb2.NewPointWithMeasurement("device_status").
+		AddTag("device_id", data["device_id"].(string)).
+		AddTag("mikrotik_id", data["mikrotik_id"].(string)).
+		AddTag("site_id", data["site_id"].(string)).
+		AddTag("organization_id", data["organization_id"].(string)).
+		AddTag("device_type", data["device_type"].(string)).
+		AddTag("ip_address", data["ip_address"].(string)).
+		AddField("is_online", data["is_online"]).
+		AddField("ping_latency_ms", data["ping_latency_ms"]).
+		SetTime(time.Now())
+
+	return writeAPI.WritePoint(context.Background(), point)
+}
+
+func writePortStatus(client influxdb2.Client, tags map[string]string, fields map[string]interface{}) error {
+	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+
+	point := influxdb2.NewPoint("port_status", tags, fields, time.Now())
+
+	return writeAPI.WritePoint(context.Background(), point)
+}
+
+func writeTrafficPerDevice(client influxdb2.Client, data map[string]interface{}) error {
+	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+
+	point := influxdb2.NewPointWithMeasurement("traffic_per_device").
+		AddTag("device_id", data["device_id"].(string)).
+		AddTag("mikrotik_id", data["mikrotik_id"].(string)).
+		AddTag("site_id", data["site_id"].(string)).
+		AddTag("ip_address", data["ip_address"].(string)).
+		AddField("rx_bytes", data["rx_bytes"]).
+		AddField("tx_bytes", data["tx_bytes"]).
+		SetTime(time.Now())
+
+	return writeAPI.WritePoint(context.Background(), point)
+}
+
+func handleAllMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	client := influxdb2.NewClient(influxURL, influxToken)
+	defer client.Close()
+
+	var writeErrs []string
+
+	// Try writing all measurements
+	if err := writeMikrotikMetrics(client, input); err != nil {
+		writeErrs = append(writeErrs, "mikrotik_metrics: "+err.Error())
+	}
+	if err := writeDeviceStatus(client, input); err != nil {
+		writeErrs = append(writeErrs, "device_status: "+err.Error())
+	}
+	if err := writePortStatus(client,
+		map[string]string{
+			"device_id":       input["device_id"].(string),
+			"port":            input["port"].(string),
+			"mikrotik_id":     input["mikrotik_id"].(string),
+			"site_id":         input["site_id"].(string),
+			"organization_id": input["organization_id"].(string),
+			"ip_address":      input["ip_address"].(string),
+			"service_name":    input["service_name"].(string),
+		},
+		map[string]interface{}{
+			"is_open": input["is_open"],
+		},
+	); err != nil {
+		writeErrs = append(writeErrs, "port_status: "+err.Error())
+	}
+	if err := writeTrafficPerDevice(client, input); err != nil {
+		writeErrs = append(writeErrs, "traffic_per_device: "+err.Error())
+	}
+
+	if len(writeErrs) > 0 {
+		http.Error(w, "Partial InfluxDB write errors:\n"+strings.Join(writeErrs, "\n"), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
