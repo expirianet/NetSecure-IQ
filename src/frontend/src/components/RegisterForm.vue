@@ -1,104 +1,165 @@
 <template>
-  <div class="register-wrapper">
-    <div class="register-container">
-      <div class="register-card">
-        <h2 class="register-title">NetSecure-IQ</h2>
-        <h3 class="register-subtitle">Create your account</h3>
+  <div>
+    <!-- Fond animé Particles.js -->
+    <div id="particles-js"></div>
 
-        <form @submit.prevent="register" class="register-form">
-          <input
-            v-model="email"
-            type="email"
-            placeholder="Email address"
-            required
-          />
+    <!-- Contenu du register -->
+    <div class="register-wrapper">
+      <div class="register-container">
+        <div class="register-card">
+          <h2 class="register-title">NetSecure-IQ</h2>
+          <h3 class="register-subtitle">Create your account</h3>
 
-          <button type="submit" :disabled="loading">
-            {{ loading ? "Registering..." : "Register" }}
-          </button>
-        </form>
+          <form @submit.prevent="register" class="register-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <button type="submit" :disabled="loading">
+              {{ loading ? "Registering..." : "Register" }}
+            </button>
+          </form>
 
-        <p v-if="message" class="register-message success">{{ message }}</p>
-        <p v-if="error" class="register-message error">{{ error }}</p>
+          <p v-if="message" class="register-message success">{{ message }}</p>
+          <p v-if="error" class="register-message error">{{ error }}</p>
 
-        <p class="register-footer">
-          Already have an account?
-          <router-link to="/login">Login</router-link>
-        </p>
+          <p class="register-footer">
+            Already have an account?
+            <router-link to="/login">Login</router-link>
+          </p>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
-<script>
-export default {
-  data() {
-    return {
-      email: '',
-      message: '',
-      error: '',
-      loading: false
-    }
-  },
-  methods: {
-    async register() {
-      this.message = ''
-      this.error = ''
-      this.loading = true
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
-      try {
-        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: this.email })
+const email = ref('')
+const message = ref('')
+const error = ref('')
+const loading = ref(false)
+const router = useRouter()
+
+onMounted(() => {
+  const script = document.createElement('script')
+  script.src = '/particles/particles.min.js'
+  script.onload = () => {
+    setTimeout(() => {
+      if (window.particlesJS) {
+        window.particlesJS('particles-js', {
+          particles: {
+            number: { value: 80, density: { enable: true, value_area: 800 } },
+            color: { value: '#ffffff' },
+            shape: { type: 'circle' },
+            opacity: { value: 0.5 },
+            size: { value: 3, random: true },
+            line_linked: {
+              enable: true,
+              distance: 150,
+              color: '#ffffff',
+              opacity: 0.4,
+              width: 1
+            },
+            move: {
+              enable: true,
+              speed: 6,
+              direction: 'none',
+              out_mode: 'bounce'
+            }
+          },
+          interactivity: {
+            detect_on: 'canvas',
+            events: {
+              onhover: { enable: true, mode: 'repulse' },
+              onclick: { enable: true, mode: 'push' },
+              resize: true
+            },
+            modes: {
+              repulse: { distance: 200 },
+              push: { particles_nb: 4 }
+            }
+          },
+          retina_detect: true
         })
-
-        const data = await res.json()
-
-        if (!res.ok) throw new Error(data.error || data.message || 'Registration failed')
-
-        this.message = data.message || 'Registration successful. Check your email.'
-        this.email = ''
-
-        setTimeout(() => {
-          this.$router.push('/login')
-        }, 3000)
-      } catch (err) {
-        this.error = err.message
-      } finally {
-        this.loading = false
       }
-    }
+    }, 100)
+  }
+  document.body.appendChild(script)
+})
+
+const register = async () => {
+  message.value = ''
+  error.value = ''
+  loading.value = true
+
+  try {
+    const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value })
+    })
+
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || data.message || 'Registration failed')
+
+    message.value = data.message || 'Registration successful. Check your email.'
+    email.value = ''
+
+    setTimeout(() => {
+      router.push('/login')
+    }, 3000)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    loading.value = false
   }
 }
 </script>
 
 <style scoped>
 :root {
-  --bg-dark: #0E111A;
-  --panel-grey: #1A1D26;
-  --divider-grey: #2A2D36;
-  --text-primary: #F5F7FA;
-  --text-secondary: #9CA3AF;
-  --primary-accent: #00C2C2;
-  --primary-hover: #00A7A7;
-  --danger: #EF4444;
-  --success: #22C55E;
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Fond animé */
+#particles-js {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-dark);
+  pointer-events: none;
+}
+
+.register-wrapper {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 32px;
 }
 
 .register-wrapper,
 .register-wrapper * {
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-}
-
-.register-wrapper {
-  min-height: 100vh;
-  background-color: var(--bg-dark);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 32px;
 }
 
 .register-container {
@@ -174,7 +235,7 @@ button:hover {
 }
 
 button:disabled {
-  background-color: #2F333D;
+  background-color: #2f333d;
   color: #666;
   cursor: not-allowed;
 }
