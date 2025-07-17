@@ -17,7 +17,8 @@ services:
     ports:
       - "8086:8086"
     volumes:
-      - influxdb_data:/var/lib/influxdb
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
@@ -32,7 +33,7 @@ services:
       dockerfile: Dockerfile
     working_dir: /app
     ports:
-    - "8000:8080"
+      - "8000:8080"
     environment:
       POSTGRES_HOST: postgresql
       POSTGRES_USER: netsecure_iq
