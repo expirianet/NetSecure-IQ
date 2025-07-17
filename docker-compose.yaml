@@ -41,6 +41,10 @@ services:
       POSTGRES_DB: netsecure_iq_db
       INFLUXDB_HOST: influxdb
       INFLUXDB_PORT: 8086
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: my-token
+      INFLUXDB_ORG: netsecure-org
+      INFLUXDB_BUCKET: netsecure
       JWT_SECRET: your_super_secret_key_change_me
     depends_on:
       - postgresql

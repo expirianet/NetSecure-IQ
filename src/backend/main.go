@@ -23,6 +23,13 @@ import (
 var db *sql.DB
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
+var (
+	influxToken  = os.Getenv("INFLUXDB_TOKEN")
+	influxBucket = os.Getenv("INFLUXDB_BUCKET")
+	influxOrg    = os.Getenv("INFLUXDB_ORG")
+	influxURL    = os.Getenv("INFLUXDB_URL")
+)
+
 type RegisterRequest struct {
 	Email string `json:"email"`
 }
@@ -78,6 +85,8 @@ func main() {
 
 	if host == "" || user == "" || password == "" || dbname == "" {
 		log.Println("⚠️ One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
+	} else if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
+		log.Println("⚠️ InfluxDB environment variables are missing or incomplete.")
 	} else {
 		connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
 		db, err = sql.Open("postgres", connStr)
@@ -265,17 +274,16 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📡 Ping received: %+v\n", data)
 
-	const (
-		token  = "my-token"
-		bucket = "netsecure"
-		org    = "netsecure-org"
-		url    = "http://influxdb:8086"
-	)
+	// Validate required env values
+	if influxToken == "" || influxBucket == "" || influxOrg == "" || influxURL == "" {
+		http.Error(w, "InfluxDB environment not configured properly", http.StatusInternalServerError)
+		return
+	}
 
-	client := influxdb2.NewClient(url, token)
+	client := influxdb2.NewClient(influxURL, influxToken)
 	defer client.Close()
 
-	writeAPI := client.WriteAPIBlocking(org, bucket)
+	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
 
 	p := influxdb2.NewPointWithMeasurement("device_status").
 		AddTag("mac", data.MAC).
@@ -349,24 +357,27 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func handleRouters(w http.ResponseWriter, r *http.Request) {
-	const (
-		token  = "my-token"
-		bucket = "netsecure"
-		org    = "netsecure-org"
-		url    = "http://influxdb:8086"
-	)
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-	client := influxdb2.NewClient(url, token)
+	if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
+		http.Error(w, "InfluxDB environment not configured properly", http.StatusInternalServerError)
+		return
+	}
+
+	client := influxdb2.NewClient(influxURL, influxToken)
 	defer client.Close()
 
-	queryAPI := client.QueryAPI(org)
-	query := `
-		from(bucket: "netsecure")
+	queryAPI := client.QueryAPI(influxOrg)
+	query := fmt.Sprintf(`
+		from(bucket: "%s")
 			|> range(start: -7d)
 			|> filter(fn: (r) => r._measurement == "device_status")
 			|> filter(fn: (r) => r._field == "status")
 			|> last()
-	`
+	`, influxBucket)
 
 	result, err := queryAPI.Query(context.Background(), query)
 	if err != nil {
