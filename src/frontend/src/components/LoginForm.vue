@@ -302,5 +302,21 @@ button:disabled {
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--danger);
 }
+
+.login-card {
+  background-color: var(--panel-grey);
+  border-radius: 12px;
+  padding: 32px; /* ⬅️ on revient à un padding uniforme */
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
+  box-sizing: border-box; /* ✅ garantit que padding ne déborde pas */
+}
+
+.login-form input,
+.login-form button {
+  width: 100%; /* ⬅️ occuper tout l'espace disponible */
+  box-sizing: border-box; /* 🔒 empêche les débordements latéraux */
+}
+
+
 </style>
 

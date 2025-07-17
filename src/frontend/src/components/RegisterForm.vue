@@ -1,6 +1,6 @@
 <template>
   <div>
-    <!-- Fond animé Particles.js -->
+    <!-- Fond animé derrière tout -->
     <div id="particles-js"></div>
 
     <!-- Contenu du register -->
@@ -49,45 +49,43 @@ onMounted(() => {
   const script = document.createElement('script')
   script.src = '/particles/particles.min.js'
   script.onload = () => {
-    setTimeout(() => {
-      if (window.particlesJS) {
-        window.particlesJS('particles-js', {
-          particles: {
-            number: { value: 80, density: { enable: true, value_area: 800 } },
-            color: { value: '#ffffff' },
-            shape: { type: 'circle' },
-            opacity: { value: 0.5 },
-            size: { value: 3, random: true },
-            line_linked: {
-              enable: true,
-              distance: 150,
-              color: '#ffffff',
-              opacity: 0.4,
-              width: 1
-            },
-            move: {
-              enable: true,
-              speed: 6,
-              direction: 'none',
-              out_mode: 'bounce'
-            }
+    if (window.particlesJS) {
+      window.particlesJS('particles-js', {
+        particles: {
+          number: { value: 80, density: { enable: true, value_area: 800 } },
+          color: { value: '#ffffff' },
+          shape: { type: 'circle' },
+          opacity: { value: 0.5 },
+          size: { value: 3, random: true },
+          line_linked: {
+            enable: true,
+            distance: 150,
+            color: '#ffffff',
+            opacity: 0.4,
+            width: 1
           },
-          interactivity: {
-            detect_on: 'canvas',
-            events: {
-              onhover: { enable: true, mode: 'repulse' },
-              onclick: { enable: true, mode: 'push' },
-              resize: true
-            },
-            modes: {
-              repulse: { distance: 200 },
-              push: { particles_nb: 4 }
-            }
+          move: {
+            enable: true,
+            speed: 6,
+            direction: 'none',
+            out_mode: 'bounce'
+          }
+        },
+        interactivity: {
+          detect_on: 'canvas',
+          events: {
+            onhover: { enable: true, mode: 'repulse' },
+            onclick: { enable: true, mode: 'push' },
+            resize: true
           },
-          retina_detect: true
-        })
-      }
-    }, 100)
+          modes: {
+            repulse: { distance: 200 },
+            push: { particles_nb: 4 }
+          }
+        },
+        retina_detect: true
+      })
+    }
   }
   document.body.appendChild(script)
 })
@@ -110,9 +108,7 @@ const register = async () => {
     message.value = data.message || 'Registration successful. Check your email.'
     email.value = ''
 
-    setTimeout(() => {
-      router.push('/login')
-    }, 3000)
+    setTimeout(() => router.push('/login'), 3000)
   } catch (err) {
     error.value = err.message
   } finally {
@@ -146,13 +142,14 @@ const register = async () => {
   pointer-events: none;
 }
 
+/* Couche par-dessus */
 .register-wrapper {
   position: relative;
   z-index: 10;
   min-height: 100vh;
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   padding: 32px;
 }
 
@@ -169,12 +166,10 @@ const register = async () => {
 
 .register-card {
   background-color: var(--panel-grey);
-  padding: 32px;
   border-radius: 12px;
+  padding: 32px;
   box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  box-sizing: border-box;
 }
 
 .register-title {
@@ -195,6 +190,12 @@ const register = async () => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.register-form input,
+.register-form button {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 input {
@@ -220,11 +221,11 @@ input:focus {
 button {
   background-color: var(--primary-accent);
   color: var(--bg-dark);
+  border: none;
+  border-radius: 6px;
   font-weight: 600;
   font-size: 14px;
   padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -241,10 +242,11 @@ button:disabled {
 }
 
 .register-message {
-  text-align: center;
+  margin-top: 16px;
   font-size: 14px;
   padding: 10px 12px;
   border-radius: 6px;
+  text-align: center;
 }
 
 .register-message.success {
