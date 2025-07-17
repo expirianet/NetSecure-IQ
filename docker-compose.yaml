@@ -58,3 +58,4 @@ services:
 volumes:
   postgresql_data:
   influxdb_data:
+  influxdb_config:
