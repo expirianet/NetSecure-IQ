@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -77,6 +79,10 @@ type CreateUserRequest struct {
 //var org OrganizationRequest
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ No .env file found (using real env vars)")
+	}
+
 	var err error
 
 	host := os.Getenv("POSTGRES_HOST")
@@ -117,6 +123,8 @@ func main() {
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/data/mikrotik-all", withCORS(handleAllMetrics))
 
+	fmt.Println("🔐 JWT Secret:", jwtSecret)
+	fmt.Println("📦 Influx URL:", influxURL)
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
