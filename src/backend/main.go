@@ -28,6 +28,7 @@ var (
 	influxBucket = os.Getenv("INFLUXDB_BUCKET")
 	influxOrg    = os.Getenv("INFLUXDB_ORG")
 	influxURL    = os.Getenv("INFLUXDB_URL")
+	influxClient influxdb2.Client
 )
 
 type RegisterRequest struct {
@@ -97,6 +98,10 @@ func main() {
 		} else {
 			fmt.Println("✅ Connected to PostgreSQL successfully")
 		}
+
+		influxClient = influxdb2.NewClient(influxURL, influxToken)
+		fmt.Println("✅ Connected to InfluxDB")
+		defer influxClient.Close()
 	}
 
 	if len(jwtSecret) == 0 {
@@ -275,16 +280,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📡 Ping received: %+v\n", data)
 
-	// Validate required env values
-	if influxToken == "" || influxBucket == "" || influxOrg == "" || influxURL == "" {
-		http.Error(w, "InfluxDB environment not configured properly", http.StatusInternalServerError)
-		return
-	}
-
-	client := influxdb2.NewClient(influxURL, influxToken)
-	defer client.Close()
-
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
 
 	p := influxdb2.NewPointWithMeasurement("device_status").
 		AddTag("mac", data.MAC).
@@ -363,15 +359,7 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
-		http.Error(w, "InfluxDB environment not configured properly", http.StatusInternalServerError)
-		return
-	}
-
-	client := influxdb2.NewClient(influxURL, influxToken)
-	defer client.Close()
-
-	queryAPI := client.QueryAPI(influxOrg)
+	queryAPI := influxClient.QueryAPI(influxOrg)
 	query := fmt.Sprintf(`
 		from(bucket: "%s")
 			|> range(start: -7d)
@@ -535,8 +523,8 @@ Please log in and change your password as soon as possible.
 	})
 }
 
-func writeMikrotikMetrics(client influxdb2.Client, data map[string]interface{}) error {
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+func writeMikrotikMetrics(data map[string]interface{}) error {
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
 
 	point := influxdb2.NewPointWithMeasurement("mikrotik_metrics").
 		AddTag("mikrotik_id", data["mikrotik_id"].(string)).
@@ -554,8 +542,8 @@ func writeMikrotikMetrics(client influxdb2.Client, data map[string]interface{}) 
 	return writeAPI.WritePoint(context.Background(), point)
 }
 
-func writeDeviceStatus(client influxdb2.Client, data map[string]interface{}) error {
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+func writeDeviceStatus(data map[string]interface{}) error {
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
 
 	point := influxdb2.NewPointWithMeasurement("device_status").
 		AddTag("device_id", data["device_id"].(string)).
@@ -571,16 +559,16 @@ func writeDeviceStatus(client influxdb2.Client, data map[string]interface{}) err
 	return writeAPI.WritePoint(context.Background(), point)
 }
 
-func writePortStatus(client influxdb2.Client, tags map[string]string, fields map[string]interface{}) error {
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+func writePortStatus(tags map[string]string, fields map[string]interface{}) error {
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
 
 	point := influxdb2.NewPoint("port_status", tags, fields, time.Now())
 
 	return writeAPI.WritePoint(context.Background(), point)
 }
 
-func writeTrafficPerDevice(client influxdb2.Client, data map[string]interface{}) error {
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+func writeTrafficPerDevice(data map[string]interface{}) error {
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
 
 	point := influxdb2.NewPointWithMeasurement("traffic_per_device").
 		AddTag("device_id", data["device_id"].(string)).
@@ -606,19 +594,16 @@ func handleAllMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := influxdb2.NewClient(influxURL, influxToken)
-	defer client.Close()
-
 	var writeErrs []string
 
 	// Try writing all measurements
-	if err := writeMikrotikMetrics(client, input); err != nil {
+	if err := writeMikrotikMetrics(input); err != nil {
 		writeErrs = append(writeErrs, "mikrotik_metrics: "+err.Error())
 	}
-	if err := writeDeviceStatus(client, input); err != nil {
+	if err := writeDeviceStatus(input); err != nil {
 		writeErrs = append(writeErrs, "device_status: "+err.Error())
 	}
-	if err := writePortStatus(client,
+	if err := writePortStatus(
 		map[string]string{
 			"device_id":       input["device_id"].(string),
 			"port":            input["port"].(string),
@@ -634,7 +619,7 @@ func handleAllMetrics(w http.ResponseWriter, r *http.Request) {
 	); err != nil {
 		writeErrs = append(writeErrs, "port_status: "+err.Error())
 	}
-	if err := writeTrafficPerDevice(client, input); err != nil {
+	if err := writeTrafficPerDevice(input); err != nil {
 		writeErrs = append(writeErrs, "traffic_per_device: "+err.Error())
 	}
 
