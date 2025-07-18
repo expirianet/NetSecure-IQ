@@ -105,7 +105,7 @@ const login = async () => {
   loading.value = true
   try {
     const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/api/login`, {
+      `${process.env.VUE_APP_BACKEND_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.value, password: password.value })

@@ -96,7 +96,7 @@ const register = async () => {
   loading.value = true
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/register`, {
+    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email.value })
