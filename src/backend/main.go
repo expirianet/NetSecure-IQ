@@ -110,7 +110,7 @@ func main() {
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
-	http.HandleFunc("/api/data/mikrotik-all", withCORS(jwtMiddleware(handleAllMetrics)))
+	http.HandleFunc("/api/data/mikrotik-all", withCORS(handleAllMetrics))
 
 	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
 	log.Fatal(http.ListenAndServe(":8080", nil))

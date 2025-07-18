@@ -1,0 +1,22 @@
+﻿{
+    "mikrotik_id": "MT-001",
+    "site_id": "SITE-01",
+    "organization_id": "ORG-01",
+    "model": "hAP ac²",
+    "cpu_usage": 32.4,
+    "memory_usage": 71.8,
+    "uptime_seconds": 235601,
+    "rx_total_bytes": 123456789,
+    "tx_total_bytes": 987654321,
+    "online_status": true,
+    "device_id": "DEV-01",
+    "device_type": "router",
+    "ip_address": "192.168.88.1",
+    "is_online": true,
+    "ping_latency_ms": 8.75,
+    "rx_bytes": 100000,
+    "tx_bytes": 250000,
+    "port": "22",
+    "service_name": "ssh",
+    "is_open": true
+}
