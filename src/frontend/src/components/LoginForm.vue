@@ -172,111 +172,96 @@ const login = async () => {
 .login-wrapper {
   position: relative;
   z-index: 10;
-}
-
-/* Texte blanc partout */
-.login-wrapper,
-.login-wrapper * {
-  color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
-}
-
-/* Mise en page */
-.login-wrapper {
-  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
+  min-height: 100vh;
 }
 
 .login-container {
+  position: relative;
+  z-index: 1;
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
+  padding: 24px;
 }
 
 .login-card {
   background-color: var(--panel-grey);
   border-radius: 12px;
   padding: 32px;
-  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
 .login-title {
+  font-size: 2.5em;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
   text-align: center;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--primary-accent);
-  margin-bottom: 8px;
 }
 
 .login-subtitle {
+  font-size: 1.1em;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
   text-align: center;
-  font-size: 16px;
-  margin-bottom: 24px;
 }
 
-/* Formulaire */
 .login-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-input {
-  background-color: var(--panel-grey);
-  border: 1px solid var(--divider-grey);
-  border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: border-color 0.2s ease;
-}
-
-input::placeholder {
-  color: var(--text-secondary);
-}
-
-input:focus {
-  outline: none;
-  border-color: var(--primary-accent);
-  background-color: var(--bg-dark);
-}
-
-/* Bouton */
-button {
-  background-color: var(--primary-accent);
-  color: var(--bg-dark);
+.login-form input {
+  width: 100%;
+  padding: 12px;
   border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-  padding: 12px 20px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-button:hover {
-  background-color: var(--primary-hover);
+  border-radius: 8px;
+  background-color: var(--panel-grey);
   color: var(--text-primary);
+  font-size: 1em;
+  box-sizing: border-box;
 }
 
-button:disabled {
-  background-color: #2f333d;
-  color: #666;
+.login-form input:focus {
+  outline: none;
+  border: 1px solid var(--primary-accent);
+  box-shadow: 0 0 0 2px var(--primary-accent);
+}
+
+.login-form button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--primary-accent);
+  color: white;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-sizing: border-box;
+}
+
+.login-form button:hover {
+  background-color: var(--primary-hover);
+}
+
+.login-form button:disabled {
+  background-color: var(--divider-grey);
   cursor: not-allowed;
 }
 
-/* Footer */
 .login-footer {
   text-align: center;
-  font-size: 13px;
-  margin-top: 16px;
+  margin-top: 24px;
+  color: var(--text-secondary);
 }
 
 .login-footer a {
   color: var(--primary-accent);
-  margin-left: 4px;
   text-decoration: none;
 }
 
@@ -284,39 +269,22 @@ button:disabled {
   color: var(--primary-hover);
 }
 
-/* Messages */
 .login-message {
   margin-top: 16px;
-  font-size: 14px;
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: 12px;
+  border-radius: 8px;
   text-align: center;
 }
 
 .login-message.success {
-  background-color: rgba(34, 197, 94, 0.1);
-  color: var(--success);
+  background-color: var(--success);
+  color: white;
 }
 
 .login-message.error {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
+  background-color: var(--danger);
+  color: white;
 }
-
-.login-card {
-  background-color: var(--panel-grey);
-  border-radius: 12px;
-  padding: 32px; /* ⬅️ on revient à un padding uniforme */
-  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-  box-sizing: border-box; /* ✅ garantit que padding ne déborde pas */
-}
-
-.login-form input,
-.login-form button {
-  width: 100%; /* ⬅️ occuper tout l'espace disponible */
-  box-sizing: border-box; /* 🔒 empêche les débordements latéraux */
-}
-
 
 </style>
 
