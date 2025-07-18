@@ -168,123 +168,141 @@ const login = async () => {
   pointer-events: none;
 }
 
-/* Contenu du formulaire devant */
+/* Contenu du formulaire/* Le fond */
 .login-wrapper {
   position: relative;
   z-index: 10;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  padding: 32px;
 }
 
+/* Le conteneur principal */
 .login-container {
-  position: relative;
-  z-index: 1;
   width: 100%;
-  max-width: 400px;
-  padding: 24px;
+  max-width: 420px;
 }
 
+/* La carte de login */
 .login-card {
   background-color: var(--panel-grey);
   border-radius: 12px;
   padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
+  box-sizing: border-box;
 }
 
+/* Le titre */
 .login-title {
-  font-size: 2.5em;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 16px;
   text-align: center;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--primary-accent);
+  margin-bottom: 8px;
 }
 
+/* Le sous-titre */
 .login-subtitle {
-  font-size: 1.1em;
-  color: var(--text-secondary);
-  margin-bottom: 32px;
   text-align: center;
+  font-size: 16px;
+  margin-bottom: 24px;
 }
 
+/* Le formulaire */
 .login-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.login-form input {
+/* Les inputs */
+.login-form input,
+.login-form button {
   width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
-  background-color: var(--panel-grey);
-  color: var(--text-primary);
-  font-size: 1em;
   box-sizing: border-box;
+}
+
+.login-form input {
+  background-color: var(--panel-grey);
+  border: 1px solid var(--divider-grey);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: border-color 0.2s ease;
+}
+
+.login-form input::placeholder {
+  color: var(--text-secondary);
 }
 
 .login-form input:focus {
   outline: none;
-  border: 1px solid var(--primary-accent);
-  box-shadow: 0 0 0 2px var(--primary-accent);
+  border-color: var(--primary-accent);
+  background-color: var(--bg-dark);
 }
 
+/* Le bouton */
 .login-form button {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
   background-color: var(--primary-accent);
-  color: white;
-  font-size: 1em;
+  color: var(--bg-dark);
+  border: none;
+  border-radius: 6px;
   font-weight: 600;
+  font-size: 14px;
+  padding: 12px 20px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  box-sizing: border-box;
+  transition: all 0.2s ease;
 }
 
 .login-form button:hover {
   background-color: var(--primary-hover);
+  color: var(--text-primary);
 }
 
 .login-form button:disabled {
-  background-color: var(--divider-grey);
+  background-color: #2f333d;
+  color: #666;
   cursor: not-allowed;
 }
 
+/* Le footer */
 .login-footer {
   text-align: center;
-  margin-top: 24px;
+  font-size: 13px;
+  margin-top: 16px;
   color: var(--text-secondary);
 }
 
 .login-footer a {
   color: var(--primary-accent);
   text-decoration: none;
+  margin-left: 4px;
 }
 
 .login-footer a:hover {
   color: var(--primary-hover);
 }
 
+/* Les messages */
 .login-message {
   margin-top: 16px;
-  padding: 12px;
-  border-radius: 8px;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
   text-align: center;
 }
 
 .login-message.success {
-  background-color: var(--success);
-  color: white;
+  background-color: rgba(34, 197, 94, 0.1);
+  color: var(--success);
 }
 
 .login-message.error {
-  background-color: var(--danger);
-  color: white;
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
 }
 
 </style>
-
