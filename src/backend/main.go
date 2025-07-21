@@ -79,8 +79,8 @@ type CreateUserRequest struct {
 //var org OrganizationRequest
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️ No .env file found (using real env vars)")
+	if err := godotenv.Load("../../config/backend_env/backend.env"); err != nil {
+		log.Println("⚠️ .env file not found at custom path — using system env vars")
 	}
 
 	var err error

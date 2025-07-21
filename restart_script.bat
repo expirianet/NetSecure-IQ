@@ -16,6 +16,10 @@ if "%ARG%"=="0" (
     call npm run build
     popd
     echo [Frontend] Build complete.
+    echo [Frontend] Restarting Docker...
+    docker-compose down
+    docker-compose up --build -d
+    echo [Frontend] Restart complete.
     goto end
 )
 

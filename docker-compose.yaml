@@ -7,10 +7,8 @@ services:
       - "5432:5432"
     volumes:
       - postgresql_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_USER: netsecure_iq
-      POSTGRES_PASSWORD: your_secure_password
-      POSTGRES_DB: netsecure_iq_db
+    env_file:
+      - ./config/backend_env/postgresql.env
 
   influxdb:
     image: influxdb:latest
@@ -19,20 +17,15 @@ services:
     volumes:
       - influxdb_data:/var/lib/influxdb2
       - influxdb_config:/etc/influxdb2
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: your_password
-      DOCKER_INFLUXDB_INIT_ORG: netsecure-org
-      DOCKER_INFLUXDB_INIT_BUCKET: netsecure
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-token
+    env_file:
+      - ./config/backend_env/influxdb.env
 
   backend:
     build:
       context: ./src/backend
       dockerfile: Dockerfile
     env_file:
-      - ./src/backend/.env
+      - ./config/backend_env/backend.env
     working_dir: /app
     ports:
       - "8000:8080"
