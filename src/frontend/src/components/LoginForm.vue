@@ -57,27 +57,27 @@ const loading = ref(false)
 const router = useRouter()
 
 /**
- * (Re)lance particles.js en fonction du thème actuel.
+ * Initialise ou recharge particles.js en fonction du thème actuel.
  */
 function renderParticles() {
   const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  // Supprime l'ancien canvas si présent
-  const oldCanvas = document.querySelector('#particles-js > canvas')
-  if (oldCanvas) oldCanvas.remove()
+  // supprime ancien canvas
+  const old = document.querySelector('#particles-js > canvas')
+  if (old) old.remove()
 
-  // Reconfigure et relance particlesJS
+  // (re)lance particlesJS
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#888888' },
+      color: { value: dark ? '#ffffff' : '#555555' },
       shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.3 },
+      opacity: { value: dark ? 0.5 : 0.5 },
       size: { value: 3, random: true },
       line_linked: {
         enable: true,
         distance: 150,
-        color: dark ? '#ffffff' : '#E0E0E0',
-        opacity: dark ? 0.4 : 0.3,
+        color: dark ? '#ffffff' : '#888888',
+        opacity: dark ? 0.4 : 0.4,
         width: 1
       },
       move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
@@ -99,22 +99,22 @@ function renderParticles() {
 }
 
 onMounted(() => {
-  // Injection de la librairie particles.js
+  // Charger script particles.min.js
   const script = document.createElement('script')
   script.src = '/particles/particles.min.js'
   script.onload = () => {
-    // Première initialisation
+    // Démarrer pour la première fois
     renderParticles()
 
-    // Observer le changement de thème
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach(m => {
+    // Observer le changement de thème (data-theme)
+    const obs = new MutationObserver((mutations) => {
+      for (const m of mutations) {
         if (m.attributeName === 'data-theme') {
           renderParticles()
         }
-      })
+      }
     })
-    observer.observe(document.documentElement, {
+    obs.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['data-theme']
     })
@@ -142,13 +142,13 @@ const login = async () => {
     message.value = 'Login successful! Redirecting...'
     successMessage.value = true
 
-    // Stockage des infos
+    // Stockage token & infos
     localStorage.setItem('token', data.token)
     localStorage.setItem('user_id', data.user_id)
     localStorage.setItem('role', data.role?.toLowerCase() || '')
     localStorage.setItem('organization_id', data.organization_id || '')
 
-    // Détermination de la redirection
+    // Choix de la redirection
     let redirectTo = '/dashboard'
     const role = data.role?.toLowerCase()
     if (role === 'user') redirectTo = '/routertable'
@@ -197,7 +197,7 @@ const login = async () => {
   transition: background-color 0.3s ease;
 }
 
-/* Fond clair en light mode */
+/* override light mode */
 [data-theme='light'] #particles-js {
   background-color: #E0E0E0;
 }
@@ -242,7 +242,7 @@ const login = async () => {
   margin-bottom: 24px;
 }
 
-/* Formulaire */
+/* Form */
 .login-form {
   display: flex;
   flex-direction: column;
@@ -256,7 +256,7 @@ const login = async () => {
   box-sizing: border-box;
 }
 
-/* Style des inputs */
+/* Input style */
 .login-form input {
   background-color: var(--panel-grey);
   border: 1px solid var(--divider-grey);
@@ -275,7 +275,7 @@ const login = async () => {
   background-color: var(--bg-dark);
 }
 
-/* Style du bouton */
+/* Bouton */
 .login-form button {
   background-color: var(--primary-accent);
   color: var(--bg-dark);
