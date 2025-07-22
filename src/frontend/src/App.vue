@@ -1,25 +1,27 @@
 <template>
   <div id="app">
-    <nav>
-      <div class="nav-links">
-        <router-link to="/login">Login</router-link> |
-        <router-link to="/register">Register</router-link>
-      </div>
-      <button class="theme-toggle" @click="toggleTheme" aria-label="Toggle theme">
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
-      </button>
-    </nav>
-
-    <router-view />
+    <!-- Barre de navigation personnalisée -->
+    <TopNavigation />
+    
+    <!-- Contenu principal -->
+    <main class="main-content">
+      <router-view />
+    </main>
 
     <!-- Canvas pour particles.js -->
     <div id="particles-js"></div>
+    
+    <!-- Bouton de basculement de thème -->
+    <button class="theme-toggle" @click="toggleTheme" :aria-label="isDark ? 'Passer en mode clair' : 'Passer en mode sombre'">
+      <span v-if="isDark">☀️</span>
+      <span v-else>🌙</span>
+    </button>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import TopNavigation from '@/components/TopNavigation.vue'
 
 // -- État du thème
 const theme = ref(localStorage.getItem('theme') || 'dark')
@@ -142,10 +144,26 @@ onMounted(() => {
 /* Style global */
 body {
   margin: 0;
+  padding: 0;
   background-color: var(--bg-dark);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+}
+
+/* Contenu principal */
+.main-content {
+  padding-top: 80px; /* Hauteur de la barre de navigation */
+  min-height: calc(100vh - 80px);
+  box-sizing: border-box;
+}
+
+/* Reset des marges et paddings */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 /* Navbar */
