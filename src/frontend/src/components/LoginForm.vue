@@ -126,7 +126,7 @@ const login = async () => {
   loading.value = true
   try {
     const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/api/login`,
+      `${import.meta.env.VUE_APP_BACKEND_URL}/api/login`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

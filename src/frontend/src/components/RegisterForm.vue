@@ -45,47 +45,68 @@ const error = ref('')
 const loading = ref(false)
 const router = useRouter()
 
+/**
+ * Initialise ou recharge particles.js en fonction du thème actuel.
+ */
+function renderParticles() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+  // supprime ancien canvas
+  const old = document.querySelector('#particles-js > canvas')
+  if (old) old.remove()
+
+  // (re)lance particlesJS
+  window.particlesJS('particles-js', {
+    particles: {
+      number: { value: 80, density: { enable: true, value_area: 800 } },
+      color: { value: dark ? '#ffffff' : '#555555' },
+      shape: { type: 'circle' },
+      opacity: { value: dark ? 0.5 : 0.5 },
+      size: { value: 3, random: true },
+      line_linked: {
+        enable: true,
+        distance: 150,
+        color: dark ? '#ffffff' : '#888888',
+        opacity: dark ? 0.4 : 0.4,
+        width: 1
+      },
+      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: {
+        onhover: { enable: true, mode: 'repulse' },
+        onclick: { enable: true, mode: 'push' },
+        resize: true
+      },
+      modes: {
+        repulse: { distance: 200 },
+        push: { particles_nb: 4 }
+      }
+    },
+    retina_detect: true
+  })
+}
+
 onMounted(() => {
+  // Charger script particles.min.js
   const script = document.createElement('script')
   script.src = '/particles/particles.min.js'
   script.onload = () => {
-    if (window.particlesJS) {
-      window.particlesJS('particles-js', {
-        particles: {
-          number: { value: 80, density: { enable: true, value_area: 800 } },
-          color: { value: '#ffffff' },
-          shape: { type: 'circle' },
-          opacity: { value: 0.5 },
-          size: { value: 3, random: true },
-          line_linked: {
-            enable: true,
-            distance: 150,
-            color: '#ffffff',
-            opacity: 0.4,
-            width: 1
-          },
-          move: {
-            enable: true,
-            speed: 6,
-            direction: 'none',
-            out_mode: 'bounce'
-          }
-        },
-        interactivity: {
-          detect_on: 'canvas',
-          events: {
-            onhover: { enable: true, mode: 'repulse' },
-            onclick: { enable: true, mode: 'push' },
-            resize: true
-          },
-          modes: {
-            repulse: { distance: 200 },
-            push: { particles_nb: 4 }
-          }
-        },
-        retina_detect: true
-      })
-    }
+    // Démarrer pour la première fois
+    renderParticles()
+
+    // Observer le changement de thème (data-theme)
+    const obs = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.attributeName === 'data-theme') {
+          renderParticles()
+        }
+      }
+    })
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
   }
   document.body.appendChild(script)
 })
@@ -135,22 +156,28 @@ const register = async () => {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 0;
   width: 100vw;
   height: 100vh;
+  z-index: 0;
   background-color: var(--bg-dark);
+  transition: background-color 0.3s ease;
   pointer-events: none;
 }
 
-/* Couche par-dessus */
+/* override light mode */
+[data-theme='light'] #particles-js {
+  background-color: #E0E0E0;
+}
+
+/* Wrapper du formulaire */
 .register-wrapper {
   position: relative;
   z-index: 10;
-  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 32px;
+  min-height: 100vh;
 }
 
 .register-wrapper,
@@ -170,6 +197,7 @@ const register = async () => {
   padding: 32px;
   box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
   box-sizing: border-box;
+  width: 100%;
 }
 
 .register-title {
