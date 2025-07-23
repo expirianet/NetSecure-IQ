@@ -46,7 +46,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 
 const email = ref('')
@@ -98,28 +98,47 @@ function renderParticles() {
   })
 }
 
-onMounted(() => {
-  // Charger script particles.min.js
-  const script = document.createElement('script')
-  script.src = '/particles/particles.min.js'
-  script.onload = () => {
-    // Démarrer pour la première fois
-    renderParticles()
-
-    // Observer le changement de thème (data-theme)
-    const obs = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (m.attributeName === 'data-theme') {
-          renderParticles()
-        }
-      }
-    })
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme']
-    })
+// Function to ensure particles are loaded after DOM and theme are ready
+async function initializeParticles() {
+  // Ensure the particles container exists
+  if (!document.getElementById('particles-js')) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return initializeParticles();
   }
-  document.body.appendChild(script)
+  
+  // Load particles script if not already loaded
+  if (!window.particlesJS) {
+    await new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = '/particles/particles.min.js';
+      script.onload = resolve;
+      document.body.appendChild(script);
+    });
+  }
+  
+  // Ensure theme is applied
+  await nextTick();
+  
+  renderParticles();
+  
+  // Set up theme change observer
+  const obs = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.attributeName === 'data-theme') {
+        renderParticles();
+      }
+    }
+  });
+
+  // Observe theme changes on document.documentElement
+  obs.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme']
+  });
+}
+
+onMounted(() => {
+  initializeParticles();
 })
 
 const login = async () => {
