@@ -42,6 +42,21 @@ services:
     depends_on:
       - backend
 
+  mikrotik:
+    image: evilfreelancer/docker-routeros:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+      - /dev/kvm
+    ports:
+      - "2222:22" # SSH
+      - "8728:8728" # API
+      - "8729:8729" # API-SSL
+      - "5900:5900" # VNC for GUI (optional)
+      - "8291:8291" # Winbox
+      - "80:80"
 volumes:
   postgresql_data:
   influxdb_data:
