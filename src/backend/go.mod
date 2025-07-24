@@ -3,7 +3,6 @@ module netsecure-backend
 go 1.24.4
 
 require (
-	github.com/go-routeros/routeros v0.0.0-20210123142807-2a44d57c6730
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0
 	github.com/joho/godotenv v1.5.1

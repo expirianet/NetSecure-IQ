@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-routeros/routeros"
 	"github.com/joho/godotenv"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -533,28 +532,41 @@ Please log in and change your password as soon as possible.
 }
 
 // Connects to MikroTik RouterOS API and fetches system resource info
-func getMikrotikSystemResource() ([]map[string]string, error) {
-	client, err := routeros.Dial("mikrotik:8728", "admin", "12345") // change to correct address and credentials
+func getMikrotikSystemResource() (map[string]interface{}, error) {
+	host := os.Getenv("MIKROTIK_HOST")
+	port := os.Getenv("MIKROTIK_PORT")
+	user := os.Getenv("MIKROTIK_USER")
+	pass := os.Getenv("MIKROTIK_PASSWORD")
+
+	if host == "" || port == "" || user == "" || pass == "" {
+		return nil, fmt.Errorf("missing MikroTik REST API credentials in environment variables")
+	}
+
+	url := fmt.Sprintf("http://%s:%s/rest/system/resource", host, port)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("RouterOS API connection failed: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	defer client.Close()
 
-	reply, err := client.Run("/system/resource/print")
+	req.SetBasicAuth(user, pass)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("RouterOS command failed: %w", err)
+		return nil, fmt.Errorf("failed to reach MikroTik REST API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	var result []map[string]string
-	for _, re := range reply.Re {
-		row := make(map[string]string)
-		for k, v := range re.Map {
-			row[k] = v
-		}
-		result = append(result, row)
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
 
-	return result, nil
+	return data, nil
 }
 
 func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
@@ -568,6 +580,11 @@ func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// ✅ Print the response to console for debugging
+	fmt.Println("📦 MikroTik REST API Response:")
+	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
+	fmt.Println(string(prettyJSON))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
