@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-routeros/routeros"
 	"github.com/joho/godotenv"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -122,6 +123,7 @@ func main() {
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/data/mikrotik-all", withCORS(handleAllMetrics))
+	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -637,4 +639,45 @@ func handleAllMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Connects to MikroTik RouterOS API and fetches system resource info
+func getMikrotikSystemResource() ([]map[string]string, error) {
+	client, err := routeros.Dial("mikrotik:8728", "admin", "12345") // change to correct address and credentials
+	if err != nil {
+		return nil, fmt.Errorf("RouterOS API connection failed: %w", err)
+	}
+	defer client.Close()
+
+	reply, err := client.Run("/system/resource/print")
+	if err != nil {
+		return nil, fmt.Errorf("RouterOS command failed: %w", err)
+	}
+
+	var result []map[string]string
+	for _, re := range reply.Re {
+		row := make(map[string]string)
+		for k, v := range re.Map {
+			row[k] = v
+		}
+		result = append(result, row)
+	}
+
+	return result, nil
+}
+
+func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	data, err := getMikrotikSystemResource()
+	if err != nil {
+		http.Error(w, "Error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }

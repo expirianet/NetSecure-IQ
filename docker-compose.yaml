@@ -57,7 +57,10 @@ services:
       - "5900:5900" # VNC for GUI (optional)
       - "8291:8291" # Winbox
       - "80:80"
+    volumes:
+      - mikrotik_data:/routeros
 volumes:
   postgresql_data:
   influxdb_data:
   influxdb_config:
+  mikrotik_data:
