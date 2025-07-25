@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -122,6 +124,7 @@ func main() {
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
+	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -588,4 +591,76 @@ func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+func getAllMikrotikMetricsAsText() (string, error) {
+	host := os.Getenv("MIKROTIK_HOST")
+	port := os.Getenv("MIKROTIK_PORT")
+	user := os.Getenv("MIKROTIK_USER")
+	pass := os.Getenv("MIKROTIK_PASSWORD")
+
+	if host == "" || port == "" || user == "" || pass == "" {
+		return "", fmt.Errorf("missing MikroTik REST API credentials")
+	}
+
+	baseURL := fmt.Sprintf("http://%s:%s/rest", host, port)
+	endpoints := map[string]string{
+		"System Resource":             "/system/resource",
+		"Interfaces":                  "/interface",
+		"ARP Table":                   "/ip/arp",
+		"Firewall Service Ports":      "/ip/firewall/service-port",
+		"Firewall Connections":        "/ip/firewall/connection",
+		"Wireless Registration Table": "/interface/wireless/registration-table",
+	}
+
+	var builder strings.Builder
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	for label, ep := range endpoints {
+		url := baseURL + ep
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			builder.WriteString(fmt.Sprintf("Section: %s\nError: failed to build request: %v\n\n", label, err))
+			continue
+		}
+		req.SetBasicAuth(user, pass)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			builder.WriteString(fmt.Sprintf("Section: %s\nError: %v\n\n", label, err))
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+
+		builder.WriteString(fmt.Sprintf("===== %s =====\n", label))
+
+		// Attempt pretty JSON print
+		var prettyJSON bytes.Buffer
+		if json.Indent(&prettyJSON, body, "", "  ") == nil {
+			builder.Write(prettyJSON.Bytes())
+		} else {
+			builder.Write(body) // fallback
+		}
+		builder.WriteString("\n\n")
+	}
+
+	return builder.String(), nil
+}
+
+func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	result, err := getAllMikrotikMetricsAsText()
+	if err != nil {
+		http.Error(w, "Error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(result))
 }
