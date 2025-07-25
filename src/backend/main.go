@@ -136,6 +136,7 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 		allowedOrigins := []string{
 			"http://localhost:8080",
 			"http://localhost:8081",
+			"http://localhost:8082",
 		}
 
 		for _, o := range allowedOrigins {
