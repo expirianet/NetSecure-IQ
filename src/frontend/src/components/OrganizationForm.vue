@@ -80,8 +80,9 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { reactive } from 'vue'
 
 const router = useRouter()
 const message = ref('')
@@ -92,99 +93,129 @@ const messageType = computed(() => {
   return successMessage.value ? 'success' : 'error'
 })
 
-// Initialize particles.js
-const initializeParticles = () => {
-  // Only run on client-side
-  if (typeof window !== 'undefined' && window.particlesJS) {
-    // Destroy existing instance if it exists
-    if (window.pJSDom && window.pJSDom.length > 0) {
-      window.pJSDom[0].pJS.fn.vendors.destroypJS();
-      window.pJSDom = [];
-    }
+/**
+ * Initialise ou recharge particles.js en fonction du thème actuel.
+ */
+function renderParticles() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark' || 
+              document.documentElement.classList.contains('dark')
+  
+  // supprime ancien canvas
+  const old = document.querySelector('#particles-js > canvas')
+  if (old) old.remove()
 
-    // Initialize particles with theme-appropriate colors
-    const isDark = document.documentElement.classList.contains('dark')
-    
-    window.particlesJS('particles-js', {
-      particles: {
-        number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: isDark ? '#ffffff' : '#000000' },
-        shape: { type: 'circle' },
-        opacity: {
-          value: 0.5,
-          random: true,
-          anim: { enable: true, speed: 1, opacity_min: 0.1, sync: false }
-        },
-        size: {
-          value: 3,
-          random: true,
-          anim: { enable: true, speed: 2, size_min: 0.1, sync: false }
-        },
-        line_linked: {
-          enable: true,
-          distance: 150,
-          color: isDark ? '#ffffff' : '#000000',
-          opacity: 0.2,
-          width: 1
-        },
-        move: {
-          enable: true,
-          speed: 1,
-          direction: 'none',
-          random: false,
-          straight: false,
-          out_mode: 'out',
-          bounce: false,
-          attract: { enable: false, rotateX: 600, rotateY: 1200 }
-        }
+  // Vérifie si le thème est défini dans localStorage
+  const savedTheme = localStorage.getItem('theme')
+  const isDark = savedTheme ? savedTheme === 'dark' : dark
+
+  // (re)lance particlesJS
+  window.particlesJS('particles-js', {
+    particles: {
+      number: { value: 80, density: { enable: true, value_area: 800 } },
+      color: { value: isDark ? '#ffffff' : '#555555' },
+      shape: { type: 'circle' },
+      opacity: { value: isDark ? 0.5 : 0.5 },
+      size: { value: 3, random: true },
+      line_linked: {
+        enable: true,
+        distance: 150,
+        color: isDark ? '#ffffff' : '#888888',
+        opacity: isDark ? 0.4 : 0.4,
+        width: 1
       },
-      interactivity: {
-        detect_on: 'canvas',
-        events: {
-          onhover: { enable: true, mode: 'grab' },
-          onclick: { enable: true, mode: 'push' },
-          resize: true
-        },
-        modes: {
-          grab: { distance: 140, line_linked: { opacity: 0.5 } },
-          push: { particles_nb: 4 }
-        }
+      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: {
+        onhover: { enable: true, mode: 'repulse' },
+        onclick: { enable: true, mode: 'push' },
+        resize: true
       },
-      retina_detect: true
-    });
-  }
+      modes: {
+        repulse: { distance: 200 },
+        push: { particles_nb: 4 }
+      }
+    },
+    retina_detect: true
+  })
 }
 
-// Handle theme changes
-const handleThemeChange = (mutations) => {
-  for (const mutation of mutations) {
-    if (mutation.attributeName === 'class') {
-      initializeParticles()
+// Function to ensure particles are loaded after DOM and theme are ready
+async function initializeParticles() {
+  // Ensure the particles container exists
+  if (!document.getElementById('particles-js')) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return initializeParticles();
+  }
+  
+  // Check for saved theme preference
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme) {
+    document.documentElement.setAttribute('data-theme', savedTheme)
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
     }
   }
+  
+  // Load particles script if not already loaded
+  if (!window.particlesJS) {
+    await new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = '/particles/particles.min.js';
+      script.onload = resolve;
+      document.body.appendChild(script);
+    });
+  }
+  
+  // Ensure theme is applied
+  await nextTick();
+  
+  renderParticles();
+  
+  // Set up theme change observer
+  const obs = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
+        // Update localStorage when theme changes
+        const theme = document.documentElement.getAttribute('data-theme') || 
+                     (document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+        localStorage.setItem('theme', theme)
+        
+        // Re-render particles with new theme
+        const old = document.querySelector('#particles-js > canvas')
+        if (old) old.remove()
+        renderParticles()
+      }
+    }
+  });
+
+  // Observe theme changes on document.documentElement
+  obs.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'class']
+  });
+  
+  // Initial render with current theme
+  renderParticles()
 }
 
 // Initialize particles when component is mounted
 onMounted(() => {
-  // Wait for particles.js to be loaded
-  if (typeof window !== 'undefined' && !window.particlesJS) {
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js'
-    script.onload = () => {
-      initializeParticles()
-      // Observe theme changes
-      const observer = new MutationObserver(handleThemeChange)
-      observer.observe(document.documentElement, { attributes: true })
-      
-      // Cleanup observer when component is unmounted
-      onUnmounted(() => {
-        observer.disconnect()
-      })
+  // Set initial theme from localStorage if available
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme) {
+    document.documentElement.setAttribute('data-theme', savedTheme)
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
     }
-    document.head.appendChild(script)
-  } else {
-    initializeParticles()
   }
+  
+  initializeParticles()
 })
 
 const form = reactive({
@@ -268,11 +299,9 @@ Data Processor:
 }
 </script>
 
-
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
 
-/* ===== Base Variables ===== */
 :root {
   --bg-dark: #0e111a;
   --panel-grey: #1a1d26;
@@ -287,7 +316,7 @@ Data Processor:
   --transition: all 0.2s ease;
 }
 
-/* ===== Base Styles ===== */
+/* Page entière */
 .login-page {
   position: relative;
   min-height: 100vh;
@@ -332,11 +361,11 @@ Data Processor:
 /* ===== Login Card ===== */
 .login-card {
   background-color: var(--panel-grey);
-  border-radius: var(--border-radius);
+  border-radius: 16px;
   padding: 32px;
   box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
   box-sizing: border-box;
-  margin: 20px 0;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 /* ===== Headers ===== */
@@ -365,10 +394,16 @@ Data Processor:
 
 /* ===== Form Sections ===== */
 .form-section {
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(31, 41, 55, 0.3);
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px;
   margin-bottom: 16px;
+  transition: background-color 0.3s ease;
+}
+
+:root:not([data-theme='dark']) .form-section {
+  background-color: rgba(243, 244, 246, 0.5);
+  border: 1px solid rgba(209, 213, 219, 0.5);
 }
 
 .form-section h4 {
