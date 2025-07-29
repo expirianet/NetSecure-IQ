@@ -399,11 +399,136 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(output)
 }
 
+// Structure pour la réponse de l'organisation
+type OrganizationResponse struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Address       string  `json:"address"`
+	VATNumber     string  `json:"vat_number"`
+	State         string  `json:"state"`
+	City          string  `json:"city"`
+	ZipCode       string  `json:"zip_code"`
+	ContactEmail  string  `json:"contact_email"`
+	PecEmail      string  `json:"pec_email"`
+	SdiCode       string  `json:"sdi_code"`
+	ContactPhone  string  `json:"contact_phone"`
+	PersonnelInfo string  `json:"personnel_info"`
+	Manager       *User   `json:"manager,omitempty"`
+	Controller    *User   `json:"controller,omitempty"`
+	Processor     *User   `json:"processor,omitempty"`
+}
+
+type User struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Phone string `json:"phone"`
+}
+
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+	switch r.Method {
+	case http.MethodPost:
+		handleCreateOrganization(w, r)
+	case http.MethodGet:
+		handleGetOrganization(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetOrganization(w http.ResponseWriter, r *http.Request) {
+	// Récupérer l'ID de l'utilisateur depuis le token JWT
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Missing authorization token", http.StatusUnauthorized)
 		return
 	}
+
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		http.Error(w, "Invalid user ID in token", http.StatusBadRequest)
+		return
+	}
+
+	// Récupérer l'organisation de l'utilisateur
+	var org OrganizationResponse
+	err = db.QueryRow(`
+		SELECT o.id, o.name, o.address, o.vat_number, o.state, o.city, 
+			o.zip_code, o.contact_email, o.pec_email, o.sdi_code, 
+			o.contact_phone, o.personnel_info
+		FROM organizations o
+		JOIN users u ON u.organization_id = o.id
+		WHERE u.id = $1
+	`, userID).Scan(
+		&org.ID, &org.Name, &org.Address, &org.VATNumber, &org.State, &org.City,
+		&org.ZipCode, &org.ContactEmail, &org.PecEmail, &org.SdiCode,
+		&org.ContactPhone, &org.PersonnelInfo,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Organization not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Récupérer les utilisateurs avec des rôles spécifiques
+	rows, err := db.Query(`
+		SELECT u.first_name || ' ' || u.last_name as name, u.email, u.phone, u.role
+		FROM users u
+		WHERE u.organization_id = $1 AND u.role IN ('manager', 'controller', 'processor')
+	`, org.ID)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch organization users: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name, email, phone, role string
+		if err := rows.Scan(&name, &email, &phone, &role); err != nil {
+			continue
+		}
+		
+		user := &User{
+			Name:  name,
+			Email: email,
+			Phone: phone,
+		}
+
+		switch role {
+		case "manager":
+			org.Manager = user
+		case "controller":
+			org.Controller = user
+		case "processor":
+			org.Processor = user
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(org)
+}
+
+func handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	var req OrganizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

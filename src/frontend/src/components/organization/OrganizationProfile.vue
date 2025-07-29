@@ -1,7 +1,23 @@
 <template>
   <div class="login-page">
+    <!-- Indicateur de chargement -->
+    <div v-if="isLoading" class="loading-overlay">
+      <div class="loading-spinner"></div>
+    </div>
+    
     <!-- animated particles background -->
     <div id="particles-js"></div>
+    
+    <!-- Messages d'erreur et de succès -->
+    <div v-if="showError" class="notification error">
+      {{ errorMessage }}
+      <button @click="showError = false" class="close-btn">&times;</button>
+    </div>
+    
+    <div v-if="showSuccess" class="notification success">
+      Données chargées avec succès !
+      <button @click="showSuccess = false" class="close-btn">&times;</button>
+    </div>
 
     <div class="login-wrapper">
       <div class="login-container">
@@ -67,44 +83,125 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 
-// --- organization data (replace with real API/store) ---
+const router = useRouter();
+const isLoading = ref(true);
+const error = ref(null);
+const showSuccess = ref(false);
+const showError = ref(false);
+const errorMessage = ref('');
+
+// Données de l'organisation
 const org = ref({
-  name: 'Acme Corporation',
-  vatNumber: 'IT12345678901',
-  address: '123 Business Street',
-  city: 'Milan',
-  state: 'MI',
-  zipCode: '20100',
-  email: 'info@acmecorp.com',
-  phone: '+39 02 1234567',
-  pecEmail: 'acmecorp@pec.it',
-  sdiCode: 'ABC12345',
+  name: '',
+  vatNumber: '',
+  address: '',
+  city: '',
+  zipCode: '',
+  state: '',
+  email: '',
+  phone: '',
+  sdiCode: '',
+  pecEmail: '',
+  personnelInfo: '',
   manager: {
-    name: 'Mario Rossi',
-    email: 'mario.rossi@acmecorp.com',
-    phone: '+39 333 1234567'
+    name: '',
+    email: '',
+    phone: ''
   },
   controller: {
-    name: 'Laura Bianchi',
-    email: 'laura.bianchi@acmecorp.com',
-    phone: '+39 345 9876543'
+    name: '',
+    email: '',
+    phone: ''
   },
   processor: {
-    name: 'Giuseppe Verdi',
-    email: 'giuseppe.verdi@acmecorp.com',
-    phone: '+39 333 7654321'
+    name: '',
+    email: '',
+    phone: ''
   }
-})
+});
 
-// --- particles setup (copied from LoginForm.vue) ---
-function renderParticles() {
-  const theme = document.documentElement.getAttribute('data-theme')
-  const isDark = theme === 'dark'
+// Récupérer les données de l'organisation depuis l'API
+const fetchOrganization = async () => {
+  try {
+    isLoading.value = true;
+    error.value = null;
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
 
-  const oldCanvas = document.querySelector('#particles-js > canvas')
-  if (oldCanvas) oldCanvas.remove()
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api/complete-organization`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || 'Failed to fetch organization data');
+    }
+
+    const data = await response.json();
+    
+    // Mettre à jour les données de l'organisation
+    org.value = {
+      name: data.name || '',
+      vatNumber: data.vat_number || '',
+      address: data.address || '',
+      city: data.city || '',
+      zipCode: data.zip_code || '',
+      state: data.state || '',
+      email: data.contact_email || '',
+      phone: data.contact_phone || '',
+      sdiCode: data.sdi_code || '',
+      pecEmail: data.pec_email || '',
+      personnelInfo: data.personnel_info || '',
+      manager: {
+        name: data.manager?.name || 'N/A',
+        email: data.manager?.email || 'N/A',
+        phone: data.manager?.phone || 'N/A',
+      },
+      controller: {
+        name: data.controller?.name || 'N/A',
+        email: data.controller?.email || 'N/A',
+        phone: data.controller?.phone || 'N/A',
+      },
+      processor: {
+        name: data.processor?.name || 'N/A',
+        email: data.processor?.email || 'N/A',
+        phone: data.processor?.phone || 'N/A',
+      },
+    };
+    
+  } catch (err) {
+    console.error('Error fetching organization:', err);
+    const message = err.message || 'An error occurred while loading organization data';
+    error.value = message;
+    errorMessage.value = message;
+    showError.value = true;
+    
+    // Rediriger vers la page de connexion si non authentifié
+    if (err.message.includes('token') || err.message.includes('authenticate')) {
+      router.push('/login');
+    }
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+// Fonction pour gérer les particules d'arrière-plan
+const renderParticles = () => {
+  const theme = document.documentElement.getAttribute('data-theme');
+  const isDark = theme === 'dark';
+
+  const oldCanvas = document.querySelector('#particles-js > canvas');
+  if (oldCanvas) oldCanvas.remove();
 
   window.particlesJS('particles-js', {
     particles: {
@@ -169,14 +266,93 @@ async function initializeParticles() {
 }
 
 // --- mount ---
-onMounted(() => {
-  document.title = 'NetSecure-IQ - Organization Profile'
-  initializeParticles()
+onMounted(async () => {
+  document.title = 'NetSecure-IQ - Organization Profile';
+  await nextTick();
+  await initializeParticles();
+  await fetchOrganization();
+  showSuccess.value = true;
+  setTimeout(() => showSuccess.value = false, 3000);
 })
 </script>
 
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+
+/* Notifications */
+.notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 400px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease-out;
+}
+
+.notification.error {
+  background-color: #ff4d4f;
+}
+
+.notification.success {
+  background-color: #52c41a;
+}
+
+.notification .close-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  margin-left: 15px;
+  padding: 0 5px;
+  line-height: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Loading indicator */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.loading-spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
 :root {
   --bg-dark: #0e111a;
