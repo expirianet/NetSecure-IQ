@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -125,6 +126,7 @@ func main() {
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
 	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
+	http.HandleFunc("/api/test-wireguard", withCORS(handleWireguardScript))
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -663,4 +665,54 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(result))
+}
+
+// This function requires "wg" binary to be installed on the system (wg-tools)
+func generateWireguardTunnelScript(mac, vpnEndpoint, serverPubKey string) (string, error) {
+	// 1. Generate private key
+	privKeyBytes, err := exec.Command("wg", "genkey").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate private key: %w", err)
+	}
+	privKey := strings.TrimSpace(string(privKeyBytes))
+
+	// 2. Generate public key
+	pubKeyCmd := exec.Command("wg", "pubkey")
+	pubKeyCmd.Stdin = strings.NewReader(privKey)
+	pubKeyBytes, err := pubKeyCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate public key: %w", err)
+	}
+	pubKey := strings.TrimSpace(string(pubKeyBytes))
+
+	// Print keys for debugging
+	fmt.Println("🔑 WireGuard Keys:")
+	fmt.Println("Private Key:", privKey)
+	fmt.Println("Public Key:", pubKey)
+
+	// 3. Assign internal IP for testing (can be replaced with real allocator later)
+	internalIP := "10.100.99.2/32"
+
+	// 4. Build RouterOS script
+	script := fmt.Sprintf(`/interface wireguard add name=wg0 private-key="%s" listen-port=13231
+/ip address add address=%s interface=wg0
+/interface wireguard peers add interface=wg0 public-key="%s" endpoint-address=%s allowed-address=0.0.0.0/0 persistent-keepalive=25
+# MAC: %s
+`, privKey, strings.TrimSuffix(internalIP, "/32"), serverPubKey, vpnEndpoint, mac)
+
+	return script, nil
+}
+
+func handleWireguardScript(w http.ResponseWriter, r *http.Request) {
+	script, err := generateWireguardTunnelScript(
+		"DC:AD:BE:EF:01:02",
+		os.Getenv("WIREGUARD_ENDPOINT"),
+		os.Getenv("VPN_SERVER_PUBLIC_KEY"),
+	)
+	if err != nil {
+		http.Error(w, "Script generation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(script))
 }
