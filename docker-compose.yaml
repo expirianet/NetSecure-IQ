@@ -76,7 +76,7 @@ services:
     ports:
       - "51820:51820/udp"
     volumes:
-      - ./src/wireguard_config:/config
+      - ./src/wireguard_config:/config-output
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
 
