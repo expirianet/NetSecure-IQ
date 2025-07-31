@@ -47,6 +47,23 @@ type OrganizationRequest struct {
 	UserID        string `json:"user_id"`
 }
 
+type OrganizationProfileResponse struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	VATNumber    string `json:"vat_number"`
+	ContactEmail string `json:"contact_email"`
+	ContactPhone string `json:"contact_phone"`
+}
+
+type UpdateOrganizationRequest struct {
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	VATNumber    string `json:"vat_number"`
+	ContactEmail string `json:"contact_email"`
+	ContactPhone string `json:"contact_phone"`
+}
+
 type RouterStatus struct {
 	MAC   string `json:"mac"`
 	Value string `json:"value"`
@@ -98,6 +115,10 @@ func main() {
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/ping", withCORS(handlePing))
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
+
+	// Organization endpoints
+	http.HandleFunc("/api/organization/profile", withCORS(jwtMiddleware(handleGetOrganizationProfile)))
+	http.HandleFunc("/api/organization/update", withCORS(jwtMiddleware(handleUpdateOrganization)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
@@ -291,11 +312,10 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleProtected(w http.ResponseWriter, r *http.Request) {
+func getOrganizationIDFromToken(r *http.Request) (string, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
-		return
+		return "", fmt.Errorf("missing Authorization header")
 	}
 
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
@@ -306,16 +326,33 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		return jwtSecret, nil
 	})
 	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
+		return "", fmt.Errorf("invalid token")
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return "", fmt.Errorf("invalid token claims")
+	}
+
+	orgID, ok := claims["organization_id"].(string)
+	if !ok || orgID == "" {
+		return "", fmt.Errorf("organization_id not found in token")
+	}
+
+	return orgID, nil
+}
+
+func handleProtected(w http.ResponseWriter, r *http.Request) {
+	orgID, err := getOrganizationIDFromToken(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	json.NewEncoder(w).Encode(claims)
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Protected endpoint",
+		"organization_id": orgID,
+	})
 }
 
 func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -569,6 +606,120 @@ func handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
+}
+
+func handleGetOrganizationProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	orgID, err := getOrganizationIDFromToken(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	var org OrganizationProfileResponse
+	err = db.QueryRow(`
+		SELECT id, name, address, vat_number, contact_email, contact_phone
+		FROM organizations
+		WHERE id = $1
+	`, orgID).Scan(
+		&org.ID,
+		&org.Name,
+		&org.Address,
+		&org.VATNumber,
+		&org.ContactEmail,
+		&org.ContactPhone,
+	)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(org)
+}
+
+func handleUpdateOrganization(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	orgID, err := getOrganizationIDFromToken(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	var req UpdateOrganizationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" || req.Address == "" || req.VATNumber == "" || req.ContactEmail == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// Update organization in database
+	result, err := db.Exec(`
+		UPDATE organizations
+		SET name = $1,
+		    address = $2,
+		    vat_number = $3,
+		    contact_email = $4,
+		    contact_phone = $5,
+		    updated_at = now()
+		WHERE id = $6
+	`, req.Name, req.Address, req.VATNumber, req.ContactEmail, req.ContactPhone, orgID)
+
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "Error checking update status", http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	// Return updated organization data
+	var org OrganizationProfileResponse
+	err = db.QueryRow(`
+		SELECT id, name, address, vat_number, contact_email, contact_phone
+		FROM organizations
+		WHERE id = $1
+	`, orgID).Scan(
+		&org.ID,
+		&org.Name,
+		&org.Address,
+		&org.VATNumber,
+		&org.ContactEmail,
+		&org.ContactPhone,
+	)
+
+	if err != nil {
+		http.Error(w, "Error fetching updated organization: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(org)
 }
 
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {
