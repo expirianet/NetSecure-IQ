@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -131,8 +130,6 @@ func main() {
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
 	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
-	http.HandleFunc("/api/test-wireguard", withCORS(handleWireguardScript))
-	http.HandleFunc("/api/mikrotik/register", withCORS(handleMikrotikRegister))
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -671,168 +668,4 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(result))
-}
-
-// This function requires "wg" binary to be installed on the system (wg-tools)
-func generateWireguardTunnelScript(mac, vpnEndpoint, serverPubKey string) (string, error) {
-	// 1. Generate private key
-	privKeyBytes, err := exec.Command("wg", "genkey").Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate private key: %w", err)
-	}
-	privKey := strings.TrimSpace(string(privKeyBytes))
-
-	// 2. Generate public key
-	pubKeyCmd := exec.Command("wg", "pubkey")
-	pubKeyCmd.Stdin = strings.NewReader(privKey)
-	pubKeyBytes, err := pubKeyCmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate public key: %w", err)
-	}
-	pubKey := strings.TrimSpace(string(pubKeyBytes))
-
-	// Print keys for debugging
-	fmt.Println("🔑 WireGuard Keys:")
-	fmt.Println("Private Key:", privKey)
-	fmt.Println("Public Key:", pubKey)
-
-	// 3. Assign internal IP for testing (can be replaced with real allocator later)
-	internalIP := "10.100.99.2/32"
-
-	// 4. Build RouterOS script
-	script := fmt.Sprintf(`/interface wireguard add name=wg0 private-key="%s" listen-port=13231
-/ip address add address=%s interface=wg0
-/interface wireguard peers add interface=wg0 public-key="%s" endpoint-address=%s allowed-address=0.0.0.0/0 persistent-keepalive=25
-# MAC: %s
-`, privKey, strings.TrimSuffix(internalIP, "/32"), serverPubKey, vpnEndpoint, mac)
-
-	return script, nil
-}
-
-func handleWireguardScript(w http.ResponseWriter, r *http.Request) {
-	script, err := generateWireguardTunnelScript(
-		"DC:AD:BE:EF:01:02",
-		os.Getenv("WIREGUARD_ENDPOINT"),
-		os.Getenv("VPN_SERVER_PUBLIC_KEY"),
-	)
-	if err != nil {
-		http.Error(w, "Script generation failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(script))
-}
-
-func handleMikrotikRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MikroTikRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
-		http.Error(w, "Invalid or missing MAC address", http.StatusBadRequest)
-		return
-	}
-
-	// Check if already registered
-	var exists bool
-	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists)
-	if err != nil {
-		http.Error(w, "Database check error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if exists {
-		http.Error(w, "MAC address already registered", http.StatusConflict)
-		return
-	}
-
-	// Generate WG keys
-	privateKey, publicKey, err := generateWireguardKeyPair()
-	if err != nil {
-		http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Assign a dummy VPN IP (placeholder — replace with allocator)
-	vpnIP := "10.100.99.2/32"
-
-	// Insert into DB
-	_, err = db.Exec(`
-		INSERT INTO mikrotik_routers (
-			id, site_id, mac_address, vpn_private_key, vpn_public_key, vpn_internal_ip,
-			provisioning_status, created_at, updated_at
-		)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'PENDING', now(), now())
-	`, req.SiteID, req.MAC, privateKey, publicKey, vpnIP)
-	if err != nil {
-		http.Error(w, "Insert failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Optional: write config file to volume
-	if err := writePeerConfigToFile(publicKey, vpnIP); err != nil {
-		log.Println("⚠️ Peer config not written:", err)
-	}
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Router registered",
-		"mac":     req.MAC,
-		"vpn_ip":  vpnIP,
-	})
-}
-
-func generateWireguardKeyPair() (privateKey, publicKey string, err error) {
-	privKeyBytes, err := exec.Command("wg", "genkey").Output()
-	if err != nil {
-		return "", "", err
-	}
-	privateKey = strings.TrimSpace(string(privKeyBytes))
-
-	pubCmd := exec.Command("wg", "pubkey")
-	pubCmd.Stdin = strings.NewReader(privateKey)
-	pubKeyBytes, err := pubCmd.Output()
-	if err != nil {
-		return "", "", err
-	}
-	publicKey = strings.TrimSpace(string(pubKeyBytes))
-	return privateKey, publicKey, nil
-}
-
-func writePeerConfigToFile(peerPublicKey, allowedIP string) error {
-	endpoint := os.Getenv("WIREGUARD_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "wireguard:51820"
-	}
-
-	serverPort := os.Getenv("WIREGUARD_PORT")
-	if serverPort == "" {
-		serverPort = "51820"
-	}
-
-	// Extract IP without /32
-	ipOnly := strings.Split(allowedIP, "/")[0]
-
-	conf := fmt.Sprintf(`[Peer]
-PublicKey = %s
-AllowedIPs = %s
-Endpoint = %s
-PersistentKeepalive = 25
-
-`, peerPublicKey, allowedIP, endpoint)
-
-	// RouterOS script version
-	routerOsScript := fmt.Sprintf(`# MikroTik RouterOS commands:
-# Paste these into the MikroTik terminal
-
-/interface wireguard add name=wg0 private-key="<PASTE_PRIVATE_KEY_HERE>" listen-port=13231
-/ip address add address=%s interface=wg0
-/interface wireguard peers add interface=wg0 public-key="%s" endpoint-address=%s endpoint-port=%s allowed-address=0.0.0.0/0 persistent-keepalive=25
-
-`, ipOnly, peerPublicKey, strings.Split(endpoint, ":")[0], serverPort)
-
-	// Append both to file
-	path := "/config-output/peers.conf"
-	final := conf + routerOsScript
-	return os.WriteFile(path, []byte(final), 0644)
 }
