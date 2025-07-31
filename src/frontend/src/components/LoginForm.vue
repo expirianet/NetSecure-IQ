@@ -172,7 +172,8 @@ const login = async () => {
     const role = data.role?.toLowerCase()
     if (role === 'user') redirectTo = '/routertable'
     else if (role === 'operator' && !data.organization_id)
-      redirectTo = '/organizationForm'
+    redirectTo = '/organization/edit'
+
 
     setTimeout(() => router.push(redirectTo), 500)
   } catch (err) {

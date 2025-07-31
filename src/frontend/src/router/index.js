@@ -14,12 +14,13 @@ const routes = [
   { path: '/login', component: LoginForm },
   { path: '/register', component: RegisterForm },
   { path: '/dashboard', component: DashboardPage },
-  { path: '/organization', component: OrganizationProfile },          // 👈 reste la route principale
-  { path: '/organization/edit', component: OrganizationForm },        // 👈 édition
+  { path: '/organization', component: OrganizationProfile },
+  { path: '/organization/edit', component: OrganizationForm }, // ✅ c’est ici qu’on redirige
   { path: '/routertable', component: RouterTable },
   { path: '/adduser', component: AddUserForm },
   { path: '/addoperator', component: AddOperatorForm }
 ]
+
 
 
 const router = createRouter({
