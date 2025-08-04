@@ -69,12 +69,13 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Rome
-      - SERVERPORT=51820
+      - SERVERPORT=55300
       - PEERS=0
       - PEERDNS=auto
       - INTERNAL_SUBNET=10.100.99.0
     ports:
-      - "51820:51820/udp"
+      - "55300:55300/udp"
+      - "9090:9090" # instead of 9090:9090
     volumes:
       - ./src/wireguard_config:/config-output
     sysctls:
