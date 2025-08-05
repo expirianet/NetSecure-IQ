@@ -48,6 +48,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuth } from '../composables/useAuth'
 
 const email = ref('')
 const password = ref('')
@@ -55,6 +56,7 @@ const message = ref('')
 const successMessage = ref(false)
 const loading = ref(false)
 const router = useRouter()
+const { login: setAuthLogin } = useAuth()
 
 /**
  * Initialise ou recharge particles.js en fonction du thème actuel.
@@ -174,7 +176,8 @@ const login = async () => {
     else if (role === 'operator' && !data.organization_id)
       redirectTo = '/organizationForm'
 
-    setTimeout(() => router.push(redirectTo), 500)
+    if (typeof setAuthLogin === 'function') setAuthLogin();
+    setTimeout(() => router.push(redirectTo), 200)
   } catch (err) {
     message.value = 'Error: ' + err.message
     successMessage.value = false

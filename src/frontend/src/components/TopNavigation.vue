@@ -13,17 +13,85 @@
       <router-link 
         to="/login" 
         class="nav-link"
-        :class="{ 'active': $route.path === '/login' }"
+        :class="{ 'active': $route.path === '/login', disabled: isAuthenticated }"
+        :tabindex="isAuthenticated ? -1 : 0"
+        :aria-disabled="isAuthenticated ? 'true' : 'false'"
       >
         Login
       </router-link>
       <router-link 
         to="/register" 
         class="nav-link"
-        :class="{ 'active': $route.path === '/register' }"
+        :class="{ 'active': $route.path === '/register', disabled: isAuthenticated }"
+        :tabindex="isAuthenticated ? -1 : 0"
+        :aria-disabled="isAuthenticated ? 'true' : 'false'"
       >
         Register
       </router-link>
+      <router-link 
+        to="/dashboard" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/dashboard', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Dashboard
+      </router-link>
+      <router-link 
+        to="/organizationForm" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/organizationForm', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Organisation
+      </router-link>
+      <router-link 
+        to="/routertable" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/routertable', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        RouterTable
+      </router-link>
+      <router-link 
+        to="/adduser" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/adduser', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Add User
+      </router-link>
+      <router-link 
+        to="/addoperator" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/addoperator', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Add Operator
+      </router-link>
+      <router-link 
+        to="/agents" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/agents', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Agents
+      </router-link>
+      <router-link 
+        to="/agents/register" 
+        class="nav-link"
+        :class="{ 'active': $route.path === '/agents/register', disabled: !isAuthenticated }"
+        :tabindex="!isAuthenticated ? -1 : 0"
+        :aria-disabled="!isAuthenticated ? 'true' : 'false'"
+      >
+        Pré-enregistrement Agent
+      </router-link>
+      <button v-if="isAuthenticated" @click="logout" class="nav-link">Logout</button>
     </div>
     
     <!-- Right side: Theme toggle -->
@@ -41,6 +109,8 @@
 </template>
 
 <script setup>
+import { useAuth } from '../composables/useAuth';
+const { isAuthenticated, logout } = useAuth();
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 
 const theme = ref(localStorage.getItem('theme') || 'dark')
