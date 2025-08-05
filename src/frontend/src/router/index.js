@@ -18,8 +18,9 @@ const routes = [
   { path: '/', component: HomePage },
   { path: '/login', component: LoginForm },
   { path: '/register', component: RegisterForm },
-<<<<<<< HEAD
   { path: '/dashboard', component: DashboardPage, meta: { requiresAuth: true } },
+  { path: '/organization', component: OrganizationProfile, meta: { requiresAuth: true } },
+  { path: '/organization/edit', component: OrganizationForm, meta: { requiresAuth: true } },
   { path: '/organizationForm', component: OrganizationForm, meta: { requiresAuth: true } },
   { path: '/routertable', component: RouterTable, meta: { requiresAuth: true } },
   { path: '/adduser', component: AddUserForm, meta: { requiresAuth: true } },
@@ -27,15 +28,6 @@ const routes = [
   { path: '/agents', component: AgentDashboard, meta: { requiresAuth: true } },
   { path: '/agents/register', component: RegisterAgent, meta: { requiresAuth: true } }
 ];
-=======
-  { path: '/dashboard', component: DashboardPage },
-  { path: '/organization', component: OrganizationProfile },
-  { path: '/organization/edit', component: OrganizationForm }, // ✅ c’est ici qu’on redirige
-  { path: '/routertable', component: RouterTable },
-  { path: '/adduser', component: AddUserForm },
-  { path: '/addoperator', component: AddOperatorForm }
-]
->>>>>>> 4e564af9b7e58dea5d6ffe261121df93dc7b54ed
 
 
 
