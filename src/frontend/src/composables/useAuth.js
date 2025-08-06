@@ -8,6 +8,7 @@ function login() {
 
 function logout() {
   isAuthenticated.value = false;
+  window.location.reload();
 }
 
 export function useAuth() {
