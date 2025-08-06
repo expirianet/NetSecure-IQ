@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="add-user-page">
     <h2>Add New User</h2>
 
     <form @submit.prevent="submitForm">
@@ -33,69 +33,100 @@
   </div>
 </template>
 
-<script>
-import { ref, onMounted } from "vue";
+<script setup>
+import { ref, onMounted } from 'vue'
 
-export default {
-  setup() {
-    const email = ref("");
-    const firstName = ref("");
-    const lastName = ref("");
-    const organizations = ref([]);
-    const selectedOrg = ref(null);
-    const message = ref("");
-    const role = localStorage.getItem("role");
-    const userOrgId = localStorage.getItem("organization_id");
+const email = ref('')
+const firstName = ref('')
+const lastName = ref('')
+const organizations = ref([])
+const selectedOrg = ref(null)
+const message = ref('')
 
-    const isAdmin = role === "administrator";
+const role = localStorage.getItem('role')
+const userOrgId = localStorage.getItem('organization_id')
+const isAdmin = role === 'administrator'
 
-    onMounted(async () => {
-      if (isAdmin) {
-        const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/organizations`, {
-          headers: {
-            Authorization: "Bearer " + localStorage.getItem("token"),
-          },
-        });
-        const data = await res.json();
-        organizations.value = data.organizations;
-      }
-    });
-
-    const submitForm = async () => {
-      const payload = {
-        email: email.value,
-        first_name: firstName.value,
-        last_name: lastName.value,
-        organization_id: isAdmin ? selectedOrg.value : userOrgId,
-      };
-
-      const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/users`, {
-        method: "POST",
+onMounted(async () => {
+  if (isAdmin) {
+    const res = await fetch(
+      `${process.env.VUE_APP_BACKEND_URL}/api/organizations`,
+      {
         headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + localStorage.getItem("token"),
+          Authorization: 'Bearer ' + localStorage.getItem('token'),
         },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        message.value = "✅ User created and password sent via email!";
-      } else {
-        message.value = "❌ Failed: " + (data.error || data.message);
       }
-    };
+    )
+    const data = await res.json().catch(() => ({ organizations: [] }))
+    organizations.value = data.organizations || []
+  }
+})
 
-    return {
-      email,
-      firstName,
-      lastName,
-      organizations,
-      selectedOrg,
-      submitForm,
-      message,
-      isAdmin,
-    };
-  },
-};
+const submitForm = async () => {
+  const payload = {
+    email: email.value,
+    first_name: firstName.value,
+    last_name: lastName.value,
+    organization_id: isAdmin ? selectedOrg.value : userOrgId,
+  }
+
+  const res = await fetch(
+    `${process.env.VUE_APP_BACKEND_URL}/api/users`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + localStorage.getItem('token'),
+      },
+      body: JSON.stringify(payload),
+    }
+  )
+  const data = await res.json().catch(() => ({ error: 'Invalid response' }))
+  message.value = res.ok
+    ? '✅ User created and password sent via email!'
+    : '❌ Failed: ' + (data.error || data.message)
+}
 </script>
+
+<style scoped>
+.add-user-page {
+  max-width: 480px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: var(--panel-grey);
+  border-radius: 8px;
+}
+.add-user-page h2 {
+  margin-bottom: 1rem;
+  color: var(--primary-accent);
+}
+.add-user-page form div {
+  margin-bottom: 0.75rem;
+}
+.add-user-page label {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--text-secondary);
+}
+.add-user-page input,
+.add-user-page select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--divider-grey);
+  border-radius: 4px;
+  background: var(--bg-dark);
+  color: var(--text-primary);
+}
+.add-user-page button {
+  margin-top: 1rem;
+  background: var(--primary-accent);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.add-user-page p {
+  margin-top: 0.5rem;
+}
+</style>

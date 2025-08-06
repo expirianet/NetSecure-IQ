@@ -1,5 +1,7 @@
 <template>
-  <div class="register-agent">
+  <div class="register-agent-page">
+    <BackgroundParticles />
+    <div class="register-agent">
     <h1>Pré-enregistrement d’un agent MikroTik</h1>
     <form @submit.prevent="onSubmit">
       <label for="mac">Adresse MAC principale (ether1):</label>
@@ -21,9 +23,11 @@
       <div v-if="testResult === false" class="error">Échec du test, vérifiez la connexion de l’agent.</div>
     </div>
   </div>
+    </div>
 </template>
 
 <script setup>
+import BackgroundParticles from '@/components/BackgroundParticles.vue';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 

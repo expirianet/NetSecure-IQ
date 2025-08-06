@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <div class="router-table-page">
+    <BackgroundParticles />
     <h2 style="margin-bottom: 1rem;">Router Status Table</h2>
     <table class="router-table" v-if="Array.isArray(routers) && routers.length">
       <thead>
@@ -24,6 +25,7 @@
 </template>
 
 <script setup>
+import BackgroundParticles from './BackgroundParticles.vue';
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
