@@ -10,28 +10,16 @@
 
     <!-- Canvas pour particles.js -->
     <div id="particles-js"></div>
-    
-    <!-- Bouton de basculement de thème -->
-    <button class="theme-toggle" @click="toggleTheme" :aria-label="isDark ? 'Passer en mode clair' : 'Passer en mode sombre'">
-      <span v-if="isDark">☀️</span>
-      <span v-else>🌙</span>
-    </button>
+    <!-- Le bouton de basculement de thème a été supprimé -->
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import TopNavigation from '@/components/TopNavigation.vue'
 
 // -- État du thème
 const theme = ref(localStorage.getItem('theme') || 'dark')
-const isDark = computed(() => theme.value === 'dark')
-
-// -- Fonction pour basculer le thème
-function toggleTheme() {
-  theme.value = isDark.value ? 'light' : 'dark'
-  localStorage.setItem('theme', theme.value)
-}
 
 // -- Mettre à jour l'attribut data-theme sur <html>
 watch(theme, (newTheme) => {
@@ -41,10 +29,9 @@ watch(theme, (newTheme) => {
 // -- Fonction d'initialisation de particles.js
 function initParticles() {
   const dark = theme.value === 'dark'
-  // si particlesJS n'existe pas, on arrête
   if (!window.particlesJS) return
 
-  // Destruction du canvas précédent
+  // Destruction de l'ancien canvas
   const oldCanvas = document.querySelector('#particles-js > canvas')
   if (oldCanvas) oldCanvas.remove()
 
@@ -92,8 +79,6 @@ onMounted(() => {
     script.src = '/particles/particles.min.js'
     script.onload = () => {
       initParticles()
-
-      // Observer les changements de data-theme
       const observer = new MutationObserver(() => initParticles())
       observer.observe(document.documentElement, {
         attributes: true,
@@ -102,9 +87,7 @@ onMounted(() => {
     }
     document.body.appendChild(script)
   } else {
-    // déjà chargé
     initParticles()
-
     const observer = new MutationObserver(() => initParticles())
     observer.observe(document.documentElement, {
       attributes: true,
@@ -185,22 +168,6 @@ nav {
 }
 .nav-links a:hover {
   color: var(--primary-hover);
-}
-
-/* Bouton toggle */
-.theme-toggle {
-  background: none;
-  border: 2px solid var(--primary-accent);
-  border-radius: 8px;
-  color: var(--primary-accent);
-  font-size: 1.1em;
-  cursor: pointer;
-  padding: 4px 10px;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-.theme-toggle:hover {
-  background-color: var(--primary-accent);
-  color: var(--bg-dark);
 }
 
 /* Canvas particles */
