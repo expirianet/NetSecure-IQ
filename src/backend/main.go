@@ -674,6 +674,10 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(result))
 }
 
+//-------------------------------------------------
+// WireGuard pre-registration for MikroTik routers
+//-------------------------------------------------
+
 // WireGuard IP Pool
 var (
 	wireguardSubnet = "10.100.99.0/24"
@@ -726,14 +730,13 @@ func getNextAvailableIP() (string, error) {
 }
 
 // MikroTik registration logic
-func MikroTikPreRegister(mac string) {
+func MikroTikPreRegister(mac string) error {
 	fmt.Println("🔧 Starting MikroTik registration for MAC:", mac)
 
 	// Step 1: Generate WireGuard keys
 	privateKey, publicKey, err := generateRealWGKeys()
 	if err != nil {
-		log.Println("❌ Key generation error:", err)
-		return
+		return fmt.Errorf("key generation failed: %w", err)
 	}
 	fmt.Println("✅ WireGuard Keys Generated")
 	fmt.Println("🔑 Private Key:", privateKey)
@@ -742,24 +745,47 @@ func MikroTikPreRegister(mac string) {
 	// Step 2: Assign IP
 	ip, err := getNextAvailableIP()
 	if err != nil {
-		log.Println("❌ IP allocation error:", err)
-		return
+		return fmt.Errorf("IP allocation failed: %w", err)
 	}
 	fmt.Println("✅ Assigned IP:", ip)
 
-	// Step 3: MikroTik config output
-	mikrotikConfig := fmt.Sprintf(`/interface wireguard add name=wg1 private-key="%s"
-/ip address add address=%s/32 interface=wg1
-/interface wireguard peers add allowed-address=%s/32 endpoint-address=NETSECURE_PUBLIC_IP endpoint-port=51820 interface=wg1 public-key=NETSECURE_PUBLIC_KEY
-`, privateKey, ip, ip)
+	// Step 3: Print MikroTik config
+	mikrotikConfig := generateMikroTikConfig(privateKey, ip)
 	fmt.Println("📄 MikroTik Configuration Script:\n", mikrotikConfig)
 
-	// Step 4: peer.conf for server side
-	serverPeerConf := fmt.Sprintf(`[Peer]
+	// Step 4: Print server-side peer config
+	serverConf := fmt.Sprintf(`[Peer]
 PublicKey = %s
-AllowedIPs = %s/32
-`, publicKey, ip)
-	fmt.Println("📄 WireGuard Peer (Server) Config:\n", serverPeerConf)
+AllowedIPs = %s/32`, publicKey, ip)
+	fmt.Println("📄 WireGuard Peer (Server) Config:\n", serverConf)
+
+	// Step 5: Store into DB
+	_, err = db.Exec(`
+		INSERT INTO mikrotik_routers (
+			id, site_id, mac_address,
+			vpn_private_key, vpn_public_key, vpn_internal_ip,
+			firmware_version, model, serial_number,
+			provisioning_status, created_at, updated_at
+		)
+		VALUES (
+			gen_random_uuid(), NULL, $1,
+			$2, $3, $4,
+			NULL, 'unknown', 'unknown',
+			'PENDING', now(), now()
+		)
+	`, mac, privateKey, publicKey, ip)
+	if err != nil {
+		return fmt.Errorf("database insert failed: %w", err)
+	}
+
+	return nil
+}
+
+func generateMikroTikConfig(privateKey, ip string) string {
+	return fmt.Sprintf(`/interface wireguard add name=wg1 private-key="%s"
+/ip address add address=%s/32 interface=wg1
+/interface wireguard peers add allowed-address=0.0.0.0/0 endpoint-address=NETSECURE_PUBLIC_IP endpoint-port=51820 interface=wg1 public-key=NETSECURE_PUBLIC_KEY`,
+		privateKey, ip)
 }
 
 func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
@@ -774,8 +800,24 @@ func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	MikroTikPreRegister(req.MAC)
+	// 🛑 Check for duplicates
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists)
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "MAC already registered", http.StatusConflict)
+		return
+	}
+
+	// ✅ Call the main provisioning logic
+	if err := MikroTikPreRegister(req.MAC); err != nil {
+		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Router registered successfully. Check backend logs for keys and config."))
+	w.Write([]byte("✅ MikroTik pre-registration completed and stored in DB."))
 }
