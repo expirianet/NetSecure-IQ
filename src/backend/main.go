@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -130,6 +133,7 @@ func main() {
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
 	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
+	http.HandleFunc("/api/mikrotik/preregister", withCORS(handleMikrotikPreRegister))
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -668,4 +672,110 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(result))
+}
+
+// WireGuard IP Pool
+var (
+	wireguardSubnet = "10.100.99.0/24"
+	startOffset     = 10
+	currentOffset   = startOffset
+	ipMutex         sync.Mutex
+)
+
+// Generates real WireGuard keys using wg tool
+func generateRealWGKeys() (string, string, error) {
+	// Run "wg genkey"
+	privateCmd := exec.Command("wg", "genkey")
+	privateOut := &bytes.Buffer{}
+	privateCmd.Stdout = privateOut
+	if err := privateCmd.Run(); err != nil {
+		return "", "", fmt.Errorf("wg genkey failed: %v", err)
+	}
+	privateKey := bytes.TrimSpace(privateOut.Bytes())
+
+	// Run "wg pubkey"
+	pubCmd := exec.Command("wg", "pubkey")
+	pubCmd.Stdin = bytes.NewReader(privateKey)
+	pubOut := &bytes.Buffer{}
+	pubCmd.Stdout = pubOut
+	if err := pubCmd.Run(); err != nil {
+		return "", "", fmt.Errorf("wg pubkey failed: %v", err)
+	}
+	publicKey := bytes.TrimSpace(pubOut.Bytes())
+
+	return string(privateKey), string(publicKey), nil
+}
+
+// Assigns next available IP from pool (simple counter for now)
+func getNextAvailableIP() (string, error) {
+	ipMutex.Lock()
+	defer ipMutex.Unlock()
+
+	_, ipnet, err := net.ParseCIDR(wireguardSubnet)
+	if err != nil {
+		return "", err
+	}
+	baseIP := ipnet.IP.To4()
+	if baseIP == nil {
+		return "", fmt.Errorf("error: Invalid subnet")
+	}
+
+	ip := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(currentOffset)).String()
+	currentOffset++
+	return ip, nil
+}
+
+// MikroTik registration logic
+func MikroTikPreRegister(mac string) {
+	fmt.Println("🔧 Starting MikroTik registration for MAC:", mac)
+
+	// Step 1: Generate WireGuard keys
+	privateKey, publicKey, err := generateRealWGKeys()
+	if err != nil {
+		log.Println("❌ Key generation error:", err)
+		return
+	}
+	fmt.Println("✅ WireGuard Keys Generated")
+	fmt.Println("🔑 Private Key:", privateKey)
+	fmt.Println("🔐 Public Key:", publicKey)
+
+	// Step 2: Assign IP
+	ip, err := getNextAvailableIP()
+	if err != nil {
+		log.Println("❌ IP allocation error:", err)
+		return
+	}
+	fmt.Println("✅ Assigned IP:", ip)
+
+	// Step 3: MikroTik config output
+	mikrotikConfig := fmt.Sprintf(`/interface wireguard add name=wg1 private-key="%s"
+/ip address add address=%s/32 interface=wg1
+/interface wireguard peers add allowed-address=%s/32 endpoint-address=NETSECURE_PUBLIC_IP endpoint-port=51820 interface=wg1 public-key=NETSECURE_PUBLIC_KEY
+`, privateKey, ip, ip)
+	fmt.Println("📄 MikroTik Configuration Script:\n", mikrotikConfig)
+
+	// Step 4: peer.conf for server side
+	serverPeerConf := fmt.Sprintf(`[Peer]
+PublicKey = %s
+AllowedIPs = %s/32
+`, publicKey, ip)
+	fmt.Println("📄 WireGuard Peer (Server) Config:\n", serverPeerConf)
+}
+
+func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MikroTikRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	MikroTikPreRegister(req.MAC)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Router registered successfully. Check backend logs for keys and config."))
 }
