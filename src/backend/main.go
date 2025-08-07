@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -682,8 +681,6 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 var (
 	wireguardSubnet = "10.100.99.0/24"
 	startOffset     = 10
-	currentOffset   = startOffset
-	ipMutex         sync.Mutex
 )
 
 // Generates real WireGuard keys using wg tool
@@ -710,23 +707,42 @@ func generateRealWGKeys() (string, string, error) {
 	return string(privateKey), string(publicKey), nil
 }
 
-// Assigns next available IP from pool (simple counter for now)
+// Assigns next available IP from pool
 func getNextAvailableIP() (string, error) {
-	ipMutex.Lock()
-	defer ipMutex.Unlock()
-
 	_, ipnet, err := net.ParseCIDR(wireguardSubnet)
 	if err != nil {
-		return "", err
-	}
-	baseIP := ipnet.IP.To4()
-	if baseIP == nil {
-		return "", fmt.Errorf("error: Invalid subnet")
+		return "", fmt.Errorf("invalid subnet: %w", err)
 	}
 
-	ip := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(currentOffset)).String()
-	currentOffset++
-	return ip, nil
+	baseIP := ipnet.IP.To4()
+	if baseIP == nil {
+		return "", fmt.Errorf("not a valid IPv4 subnet")
+	}
+
+	// Step 1: Load all currently assigned IPs from DB
+	rows, err := db.Query(`SELECT vpn_internal_ip FROM mikrotik_routers`)
+	if err != nil {
+		return "", fmt.Errorf("failed to query IPs from database: %w", err)
+	}
+	defer rows.Close()
+
+	usedIPs := make(map[string]bool)
+	for rows.Next() {
+		var ipStr string
+		if err := rows.Scan(&ipStr); err == nil {
+			usedIPs[ipStr] = true
+		}
+	}
+
+	// Step 2: Iterate over IP pool starting from .10
+	for i := startOffset; i < 255; i++ {
+		candidateIP := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(i)).String()
+		if !usedIPs[candidateIP] {
+			return candidateIP, nil
+		}
+	}
+
+	return "", fmt.Errorf("no available IPs in subnet")
 }
 
 // MikroTik registration logic
