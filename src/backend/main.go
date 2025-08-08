@@ -802,6 +802,12 @@ AllowedIPs = %s/32`, publicKey, ip)
 		"mikrotik_config": mikrotikConfig,
 		"server_peer":     serverConf,
 	}
+
+	if err := addWireGuardPeer(publicKey, ip); err != nil {
+		log.Println("⚠️ Could not add peer to WireGuard:", err)
+		// You can still return success here — the router will connect once wg0 is restarted or manually updated
+	}
+
 	return result, nil
 }
 
@@ -846,4 +852,19 @@ func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
 	// ✅ Return JSON with config
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+func addWireGuardPeer(publicKey, ip string) error {
+	cmd := exec.Command("docker", "exec", "netsecure-iq-wireguard-1",
+		"wg", "set", "wg0",
+		"peer", publicKey,
+		"allowed-ips", ip+"/32")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add WireGuard peer: %v\nOutput: %s", err, string(output))
+	}
+
+	fmt.Println("✅ WireGuard peer added via docker exec")
+	return nil
 }
