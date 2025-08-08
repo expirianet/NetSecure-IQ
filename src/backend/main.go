@@ -746,13 +746,13 @@ func getNextAvailableIP() (string, error) {
 }
 
 // MikroTik registration logic
-func MikroTikPreRegister(mac string) error {
+func MikroTikPreRegister(mac string) (map[string]string, error) {
 	fmt.Println("🔧 Starting MikroTik registration for MAC:", mac)
 
 	// Step 1: Generate WireGuard keys
 	privateKey, publicKey, err := generateRealWGKeys()
 	if err != nil {
-		return fmt.Errorf("key generation failed: %w", err)
+		return nil, fmt.Errorf("key generation failed: %w", err)
 	}
 	fmt.Println("✅ WireGuard Keys Generated")
 	fmt.Println("🔑 Private Key:", privateKey)
@@ -761,15 +761,15 @@ func MikroTikPreRegister(mac string) error {
 	// Step 2: Assign IP
 	ip, err := getNextAvailableIP()
 	if err != nil {
-		return fmt.Errorf("IP allocation failed: %w", err)
+		return nil, fmt.Errorf("IP allocation failed: %w", err)
 	}
 	fmt.Println("✅ Assigned IP:", ip)
 
-	// Step 3: Print MikroTik config
+	// Step 3: Generate MikroTik config
 	mikrotikConfig := generateMikroTikConfig(privateKey, ip)
 	fmt.Println("📄 MikroTik Configuration Script:\n", mikrotikConfig)
 
-	// Step 4: Print server-side peer config
+	// Step 4: Generate server-side peer config
 	serverConf := fmt.Sprintf(`[Peer]
 PublicKey = %s
 AllowedIPs = %s/32`, publicKey, ip)
@@ -791,10 +791,18 @@ AllowedIPs = %s/32`, publicKey, ip)
 		)
 	`, mac, privateKey, publicKey, ip)
 	if err != nil {
-		return fmt.Errorf("database insert failed: %w", err)
+		return nil, fmt.Errorf("database insert failed: %w", err)
 	}
 
-	return nil
+	// Step 6: Build return object
+	result := map[string]string{
+		"internal_ip":     ip,
+		"private_key":     privateKey,
+		"public_key":      publicKey,
+		"mikrotik_config": mikrotikConfig,
+		"server_peer":     serverConf,
+	}
+	return result, nil
 }
 
 func generateMikroTikConfig(privateKey, ip string) string {
@@ -828,12 +836,14 @@ func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Call the main provisioning logic
-	if err := MikroTikPreRegister(req.MAC); err != nil {
+	// ✅ Call MikroTikPreRegister and get config data
+	data, err := MikroTikPreRegister(req.MAC)
+	if err != nil {
 		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("✅ MikroTik pre-registration completed and stored in DB."))
+	// ✅ Return JSON with config
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
