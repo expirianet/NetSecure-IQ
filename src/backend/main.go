@@ -131,8 +131,14 @@ func main() {
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
-	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
+	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump)) // GET, ROS metrics dump
 	http.HandleFunc("/api/mikrotik/preregister", withCORS(handleMikrotikPreRegister))
+	http.HandleFunc("/api/mikrotik/list", withCORS(handleMikrotikList))
+	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
+	http.HandleFunc("/api/mikrotik/disable", withCORS(handleMikrotikDisable))
+	http.HandleFunc("/api/mikrotik/enable", withCORS(handleMikrotikEnable))
+	http.HandleFunc("/api/mikrotik/associate", withCORS(handleMikrotikAssociate))
+	http.HandleFunc("/api/mikrotik", withCORS(handleMikrotikDelete)) // DELETE
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
@@ -157,7 +163,7 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 		}
 
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -657,7 +663,7 @@ func getAllMikrotikMetricsAsText() (string, error) {
 	return builder.String(), nil
 }
 
-func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
+func handleMikrotikDump(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
 		return
@@ -854,17 +860,264 @@ func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// Reuse your existing container name
+const wgContainer = "netsecure-iq-wireguard-1"
+
+type MikroTikRow struct {
+	MAC    string
+	PubKey string
+	IP     string
+	SiteID sql.NullString
+	Status string // provisioning_status
+}
+
+// Look up a router by MAC
+func getRouterByMAC(mac string) (*MikroTikRow, error) {
+	row := db.QueryRow(`
+		SELECT mac_address, vpn_public_key, vpn_internal_ip, 
+		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
+		       site_id::text
+		FROM mikrotik_routers WHERE mac_address = $1
+	`, mac)
+	var r MikroTikRow
+	var siteID *string
+	if err := row.Scan(&r.MAC, &r.PubKey, &r.IP, &r.Status, &siteID); err != nil {
+		return nil, err
+	}
+	if siteID != nil {
+		r.SiteID = sql.NullString{String: *siteID, Valid: true}
+	}
+	return &r, nil
+}
+
+// List all routers (for dashboard)
+func listRouters() ([]MikroTikRow, error) {
+	rows, err := db.Query(`
+		SELECT mac_address, vpn_public_key, vpn_internal_ip,
+		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
+		       site_id::text
+		FROM mikrotik_routers
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []MikroTikRow
+	for rows.Next() {
+		var r MikroTikRow
+		var siteID *string
+		if err := rows.Scan(&r.MAC, &r.PubKey, &r.IP, &r.Status, &siteID); err != nil {
+			return nil, err
+		}
+		if siteID != nil {
+			r.SiteID = sql.NullString{String: *siteID, Valid: true}
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// Add/remove peer inside the WireGuard container
 func addWireGuardPeer(publicKey, ip string) error {
-	cmd := exec.Command("docker", "exec", "netsecure-iq-wireguard-1",
+	cmd := exec.Command("docker", "exec", wgContainer,
 		"wg", "set", "wg0",
 		"peer", publicKey,
 		"allowed-ips", ip+"/32")
-
-	output, err := cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to add WireGuard peer: %v\nOutput: %s", err, string(output))
+		return fmt.Errorf("wg add peer failed: %v\nOutput: %s", err, string(out))
+	}
+	return nil
+}
+
+func removeWireGuardPeer(publicKey string) error {
+	cmd := exec.Command("docker", "exec", wgContainer,
+		"wg", "set", "wg0",
+		"peer", publicKey,
+		"remove")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("wg remove peer failed: %v\nOutput: %s", err, string(out))
+	}
+	return nil
+}
+
+// Ping from inside WireGuard container to the router's internal IP
+func pingFromWireGuard(ip string) error {
+	cmd := exec.Command("docker", "exec", wgContainer, "sh", "-c",
+		fmt.Sprintf("ping -c 1 -W 2 %s >/dev/null 2>&1", ip))
+	return cmd.Run() // nil == success
+}
+
+// Helper for status label used by frontend (Associated/Unassociated/Deactivated)
+func uiStatus(r MikroTikRow) string {
+	if strings.EqualFold(r.Status, "DISABLED") || strings.EqualFold(r.Status, "DEACTIVATED") {
+		return "Deactivated"
+	}
+	if r.SiteID.Valid && r.SiteID.String != "" {
+		return "Associated"
+	}
+	return "Unassociated"
+}
+
+func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	items, err := listRouters()
+	if err != nil {
+		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type Row struct {
+		MAC    string  `json:"mac"`
+		IP     string  `json:"ip"`
+		Status string  `json:"status"`
+		SiteID *string `json:"site_id"`
+	}
+	out := make([]Row, 0, len(items))
+	for _, r := range items {
+		var site *string
+		if r.SiteID.Valid {
+			site = &r.SiteID.String
+		}
+		out = append(out, Row{
+			MAC: r.MAC, IP: r.IP, Status: uiStatus(r), SiteID: site,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+type testReq struct {
+	MAC string `json:"mac"`
+}
+
+func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req testReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	rtr, err := getRouterByMAC(req.MAC)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
 	}
 
-	fmt.Println("✅ WireGuard peer added via docker exec")
-	return nil
+	err = pingFromWireGuard(rtr.IP)
+	resp := map[string]any{"ok": err == nil}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+type macReq struct {
+	MAC string `json:"mac"`
+}
+
+func handleMikrotikDisable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req macReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	rtr, err := getRouterByMAC(req.MAC)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	if err := removeWireGuardPeer(rtr.PubKey); err != nil {
+		http.Error(w, "WG remove error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := db.Exec(`UPDATE mikrotik_routers 
+		SET provisioning_status='DISABLED', updated_at=now() WHERE mac_address=$1`, req.MAC); err != nil {
+		http.Error(w, "DB update error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleMikrotikEnable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req macReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	rtr, err := getRouterByMAC(req.MAC)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	if err := addWireGuardPeer(rtr.PubKey, rtr.IP); err != nil {
+		http.Error(w, "WG add error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := db.Exec(`UPDATE mikrotik_routers 
+		SET provisioning_status='ACTIVE', updated_at=now() WHERE mac_address=$1`, req.MAC); err != nil {
+		http.Error(w, "DB update error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type associateReq struct {
+	MAC    string `json:"mac"`
+	SiteID string `json:"site_id"`
+}
+
+func handleMikrotikAssociate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req associateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" || req.SiteID == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if _, err := db.Exec(`UPDATE mikrotik_routers 
+		SET site_id=$1, updated_at=now() WHERE mac_address=$2`, req.SiteID, req.MAC); err != nil {
+		http.Error(w, "DB update error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Only DELETE allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req macReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	rtr, err := getRouterByMAC(req.MAC)
+	if err == nil && rtr.PubKey != "" {
+		_ = removeWireGuardPeer(rtr.PubKey) // best-effort
+	}
+	if _, err := db.Exec(`DELETE FROM mikrotik_routers WHERE mac_address=$1`, req.MAC); err != nil {
+		http.Error(w, "DB delete error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
