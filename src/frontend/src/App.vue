@@ -16,8 +16,7 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import TopNavigation from '@/components/TopNavigation.vue'
-
+import TopNavigation from '@/components/navigation/TopNavigation.vue'
 // -- État du thème
 const theme = ref(localStorage.getItem('theme') || 'dark')
 

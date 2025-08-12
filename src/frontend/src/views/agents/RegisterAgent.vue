@@ -2,32 +2,32 @@
   <div class="register-agent-page">
     <BackgroundParticles />
     <div class="register-agent">
-    <h1>Pré-enregistrement d’un agent MikroTik</h1>
-    <form @submit.prevent="onSubmit">
-      <label for="mac">Adresse MAC principale (ether1):</label>
-      <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
-      <button type="submit" :disabled="loading">Générer le script</button>
-    </form>
-    <div v-if="loading" class="loading">Génération du script...</div>
-    <div v-if="script">
-      <label>Script généré :</label>
-      <textarea readonly rows="8" :value="script"></textarea>
-      <div class="actions">
-        <button @click="copyScript">Copier</button>
-        <button @click="downloadScript">Télécharger</button>
-        <button @click="testAgent" :disabled="testing">Test</button>
-        <button @click="cancelRegistration" :disabled="testing">Annuler l’inscription</button>
+      <h1>Pré-enregistrement d’un agent MikroTik</h1>
+      <form @submit.prevent="onSubmit">
+        <label for="mac">Adresse MAC principale (ether1):</label>
+        <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
+        <button type="submit" :disabled="loading">Générer le script</button>
+      </form>
+      <div v-if="loading" class="loading">Génération du script...</div>
+      <div v-if="script">
+        <label>Script généré :</label>
+        <textarea readonly rows="8" :value="script"></textarea>
+        <div class="actions">
+          <button @click="copyScript">Copier</button>
+          <button @click="downloadScript">Télécharger</button>
+          <button @click="testAgent" :disabled="testing">Test</button>
+          <button @click="cancelRegistration" :disabled="testing">Annuler l’inscription</button>
+        </div>
+        <div v-if="testing" class="loading">Test de connexion...</div>
+        <div v-if="testResult === true" class="success">Agent en ligne, peer désactivé et retour à la liste.</div>
+        <div v-if="testResult === false" class="error">Échec du test, vérifiez la connexion de l’agent.</div>
       </div>
-      <div v-if="testing" class="loading">Test de connexion...</div>
-      <div v-if="testResult === true" class="success">Agent en ligne, peer désactivé et retour à la liste.</div>
-      <div v-if="testResult === false" class="error">Échec du test, vérifiez la connexion de l’agent.</div>
     </div>
   </div>
-    </div>
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue';
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
