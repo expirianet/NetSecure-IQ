@@ -39,27 +39,36 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-// Computed properties (alignées avec le localStorage)
-const role = computed(() => (localStorage.getItem("role") || '').toLowerCase())
+// Computed properties
+const role = computed(() => localStorage.getItem("role"))
 const isAdmin = computed(() => role.value === "administrator")
 const isOperator = computed(() => role.value === "operator")
-const hasOrganization = computed(() => !!localStorage.getItem("organization_id"))
 const isAdminOrOperator = computed(() => isAdmin.value || isOperator.value)
-const needsOrganization = computed(() => isOperator.value && !hasOrganization.value)
 const canAddOperator = computed(() => isAdmin.value || (isOperator.value && hasOrganization.value))
+const needsOrganization = computed(() => {
+  // Add your organization check logic here
+  return false
+})
+const hasOrganization = computed(() => {
+  // Add your organization check logic here
+  return true
+})
 
-// Navigation methods (alignées avec tes routes)
+// Navigation methods
 const goToRouterInfo = () => {
-  router.push('/routertable')
+  router.push('/router-info')
 }
+
 const addUser = () => {
-  router.push('/adduser')
+  router.push('/add-user')
 }
+
 const goToOrganizationInfo = () => {
-  router.push('/organization/edit')
+  router.push('/organization')
 }
+
 const addOperator = () => {
-  router.push('/addoperator')
+  router.push('/add-operator')
 }
 
 // Particles initialization

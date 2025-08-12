@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import BackgroundParticles from '../common/BackgroundParticles.vue';
+import BackgroundParticles from './BackgroundParticles.vue';
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])

@@ -136,9 +136,9 @@ func GenerateMikrotikScript(peer *Peer, mac string) string {
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 <template>
   <div id="app">
-    <!-- Barre de navigation personnalisÃ©e -->
-    <TopNavigation />
-    
+    <!-- Barre de navigation (switch auto selon le rÃ´le) -->
+    <component :is="navComponent" />
+
     <!-- Contenu principal -->
     <main class="main-content">
       <router-view />
@@ -146,32 +146,45 @@ func GenerateMikrotikScript(peer *Peer, mac string) string {
 
     <!-- Canvas pour particles.js -->
     <div id="particles-js"></div>
-    <!-- Le bouton de basculement de thÃ¨me a Ã©tÃ© supprimÃ© -->
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import TopNavigation from '@/components/TopNavigation.vue'
+import TopNavigationUser from '@/components/TopNavigationUser.vue'
+import TopNavigationOperator from '@/components/TopNavigationOperator.vue'
 
-// -- Ã‰tat du thÃ¨me
-const theme = ref(localStorage.getItem('theme') || 'dark')
+/* ---------- RÃ´le & navigation ---------- */
+const role = ref(localStorage.getItem('role') || '')
 
-// -- Mettre Ã  jour l'attribut data-theme sur <html>
-watch(theme, (newTheme) => {
-  document.documentElement.setAttribute('data-theme', newTheme)
+const navComponent = computed(() => {
+  if (role.value === 'user') return TopNavigationUser
+  if (role.value === 'operator') return TopNavigationOperator
+  return TopNavigation // admin / dÃ©faut
 })
 
-// -- Fonction d'initialisation de particles.js
+function updateRoleFromStorage() {
+  role.value = localStorage.getItem('role') || ''
+}
+
+/* ---------- ThÃ¨me ---------- */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+
+watch(theme, (newTheme) => {
+  document.documentElement.setAttribute('data-theme', newTheme)
+  localStorage.setItem('theme', newTheme)
+})
+
+/* ---------- particles.js ---------- */
 function initParticles() {
   const dark = theme.value === 'dark'
   if (!window.particlesJS) return
 
-  // Destruction de l'ancien canvas
+  // DÃ©truire l'ancien canvas
   const oldCanvas = document.querySelector('#particles-js > canvas')
   if (oldCanvas) oldCanvas.remove()
 
-  // Configuration des particules
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -204,32 +217,49 @@ function initParticles() {
   })
 }
 
-// -- Monter le composant
-onMounted(() => {
-  // Appliquer d'abord le thÃ¨me
+function attachThemeObserver() {
+  const observer = new MutationObserver(() => initParticles())
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme']
+  })
+  return observer
+}
+
+/* ---------- Lifecycle ---------- */
+let themeObserver
+
+onMounted(async () => {
+  // Appliquer le thÃ¨me
   document.documentElement.setAttribute('data-theme', theme.value)
 
-  // Charger dynamiquement particles.min.js si nÃ©cessaire
+  // Charger particles si nÃ©cessaire
   if (!window.particlesJS) {
     const script = document.createElement('script')
     script.src = '/particles/particles.min.js'
     script.onload = () => {
       initParticles()
-      const observer = new MutationObserver(() => initParticles())
-      observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme']
-      })
+      themeObserver = attachThemeObserver()
     }
     document.body.appendChild(script)
   } else {
     initParticles()
-    const observer = new MutationObserver(() => initParticles())
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme']
-    })
+    themeObserver = attachThemeObserver()
   }
+
+  // Ã‰coutes pour mettre Ã  jour la nav quand lâ€™auth change
+  window.addEventListener('storage', updateRoleFromStorage)
+  window.addEventListener('auth-changed', updateRoleFromStorage)
+
+  // Sâ€™assurer que la nav se rend correctement aprÃ¨s le mount
+  await nextTick()
+  updateRoleFromStorage()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('storage', updateRoleFromStorage)
+  window.removeEventListener('auth-changed', updateRoleFromStorage)
+  if (themeObserver?.disconnect) themeObserver.disconnect()
 })
 </script>
 
@@ -278,32 +308,11 @@ body {
   box-sizing: border-box;
 }
 
-/* Reset des marges et paddings */
+/* Reset */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-/* Navbar */
-nav {
-  position: relative;
-  z-index: 20;
-  padding: 16px;
-  background-color: var(--panel-grey);
-  border-bottom: 1px solid var(--divider-grey);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.nav-links a {
-  margin: 0 8px;
-  color: var(--primary-accent);
-  text-decoration: none;
-}
-.nav-links a:hover {
-  color: var(--primary-hover);
 }
 
 /* Canvas particles */
@@ -1096,16 +1105,62 @@ onMounted(() => {
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HelloWorld.vue =====
 <template>
-  <div class="box">
-    <h3>Hello, NetSecure-IQ ðŸ‘‹</h3>
-    <slot />
+  <div class="hello">
+    <h1>{{ msg }}</h1>
+    <p>
+      For a guide and recipes on how to configure / customize this project,<br>
+      check out the
+      <a href="https://cli.vuejs.org" target="_blank" rel="noopener">vue-cli documentation</a>.
+    </p>
+    <h3>Installed CLI Plugins</h3>
+    <ul>
+      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-babel" target="_blank" rel="noopener">babel</a></li>
+      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-eslint" target="_blank" rel="noopener">eslint</a></li>
+    </ul>
+    <h3>Essential Links</h3>
+    <ul>
+      <li><a href="https://vuejs.org" target="_blank" rel="noopener">Core Docs</a></li>
+      <li><a href="https://forum.vuejs.org" target="_blank" rel="noopener">Forum</a></li>
+      <li><a href="https://chat.vuejs.org" target="_blank" rel="noopener">Community Chat</a></li>
+      <li><a href="https://twitter.com/vuejs" target="_blank" rel="noopener">Twitter</a></li>
+      <li><a href="https://news.vuejs.org" target="_blank" rel="noopener">News</a></li>
+    </ul>
+    <h3>Ecosystem</h3>
+    <ul>
+      <li><a href="https://router.vuejs.org" target="_blank" rel="noopener">vue-router</a></li>
+      <li><a href="https://vuex.vuejs.org" target="_blank" rel="noopener">vuex</a></li>
+      <li><a href="https://github.com/vuejs/vue-devtools#vue-devtools" target="_blank" rel="noopener">vue-devtools</a></li>
+      <li><a href="https://vue-loader.vuejs.org" target="_blank" rel="noopener">vue-loader</a></li>
+      <li><a href="https://github.com/vuejs/awesome-vue" target="_blank" rel="noopener">awesome-vue</a></li>
+    </ul>
   </div>
 </template>
 
-<script setup></script>
+<script>
+export default {
+  name: 'HelloWorld',
+  props: {
+    msg: String
+  }
+}
+</script>
 
+<!-- Add "scoped" attribute to limit CSS to this component only -->
 <style scoped>
-.box { padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+h3 {
+  margin: 40px 0 0;
+}
+ul {
+  list-style-type: none;
+  padding: 0;
+}
+li {
+  display: inline-block;
+  margin: 0 10px;
+}
+a {
+  color: #42b983;
+}
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HelloWorld.vue =====
@@ -1387,11 +1442,9 @@ const { login: setAuthLogin } = useAuth()
  */
 function renderParticles() {
   const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  // supprime ancien canvas
   const old = document.querySelector('#particles-js > canvas')
   if (old) old.remove()
 
-  // (re)lance particlesJS
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -1424,15 +1477,13 @@ function renderParticles() {
   })
 }
 
-// Function to ensure particles are loaded after DOM and theme are ready
+// S'assure que particles est chargÃ© aprÃ¨s le DOM et le thÃ¨me
 async function initializeParticles() {
-  // Ensure the particles container exists
   if (!document.getElementById('particles-js')) {
     await new Promise(resolve => setTimeout(resolve, 50));
     return initializeParticles();
   }
-  
-  // Load particles script if not already loaded
+
   if (!window.particlesJS) {
     await new Promise((resolve) => {
       const script = document.createElement('script');
@@ -1441,13 +1492,10 @@ async function initializeParticles() {
       document.body.appendChild(script);
     });
   }
-  
-  // Ensure theme is applied
+
   await nextTick();
-  
   renderParticles();
-  
-  // Set up theme change observer
+
   const obs = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.attributeName === 'data-theme') {
@@ -1455,8 +1503,6 @@ async function initializeParticles() {
       }
     }
   });
-
-  // Observe theme changes on document.documentElement
   obs.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-theme']
@@ -1493,13 +1539,14 @@ const login = async () => {
     localStorage.setItem('role', data.role?.toLowerCase() || '')
     localStorage.setItem('organization_id', data.organization_id || '')
 
+    // >>> IMPORTANT : informer l'app qu'on vient de se loguer (maj de la nav)
+    window.dispatchEvent(new Event('auth-changed'))
+
     // Choix de la redirection
     let redirectTo = '/dashboard'
     const role = data.role?.toLowerCase()
     if (role === 'user') redirectTo = '/routertable'
-    else if (role === 'operator' && !data.organization_id)
-    redirectTo = '/organization/edit'
-
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
 
     if (typeof setAuthLogin === 'function') setAuthLogin();
     setTimeout(() => router.push(redirectTo), 200)
@@ -3188,78 +3235,37 @@ onMounted(async () => {
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigation.vue =====
 <template>
   <nav class="navbar">
+    <!-- Left side: Brand and navigation links -->
     <div class="nav-left">
       <router-link to="/" class="brand">NetSecure-IQ</router-link>
       <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
 
-      <!-- Non connectÃ© -->
-      <template v-if="!isAuth">
+      <!-- non connectÃ© -->
+      <template v-if="!isAuthenticated">
         <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
         <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
       </template>
 
-      <!-- ConnectÃ© -->
+      <!-- connectÃ© -->
       <template v-else>
-        <!-- Commun Ã  tous les rÃ´les authentifiÃ©s -->
         <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+        <router-link to="/organizationForm" class="nav-link" :class="{ active: $route.path === '/organizationForm' }">Organisation</router-link>
         <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
-
-        <!-- Organisation : Admin + Operator -->
-        <router-link
-          v-if="isAdmin || isOperator"
-          to="/organization"
-          class="nav-link"
-          :class="{ active: $route.path.startsWith('/organization') }"
-        >
-          Organisation
-        </router-link>
-
-        <!-- Add User : Admin OU Operator (si org prÃ©sente) -->
-        <router-link
-          v-if="isAdmin || (isOperator && hasOrg)"
-          to="/adduser"
-          class="nav-link"
-          :class="{ active: $route.path === '/adduser' }"
-        >
-          Add User
-        </router-link>
-
-        <!-- Add Operator : Admin uniquement -->
-        <router-link
-          v-if="isAdmin"
-          to="/addoperator"
-          class="nav-link"
-          :class="{ active: $route.path === '/addoperator' }"
-        >
-          Add Operator
-        </router-link>
-
-        <!-- Agents + PrÃ©-enregistrement : Admin OU Operator (si org prÃ©sente) -->
-        <router-link
-          v-if="isAdmin || (isOperator && hasOrg)"
-          to="/agents"
-          class="nav-link"
-          :class="{ active: $route.path === '/agents' }"
-        >
-          Agents
-        </router-link>
-        <router-link
-          v-if="isAdmin || (isOperator && hasOrg)"
-          to="/agents/register"
-          class="nav-link"
-          :class="{ active: $route.path === '/agents/register' }"
-        >
+        <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
+        <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
+        <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
+        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
           PrÃ©-enregistrement Agent
         </router-link>
-
-        <button @click="doLogout" class="nav-link">Logout</button>
+        <button @click="logout" class="nav-link">Logout</button>
       </template>
     </div>
 
+    <!-- Right side: Theme toggle -->
     <div class="nav-right">
-      <button
-        class="theme-toggle"
-        @click="toggleTheme"
+      <button 
+        class="theme-toggle" 
+        @click="toggleTheme" 
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
         <span v-if="isDark">â˜€ï¸</span>
@@ -3270,37 +3276,12 @@ onMounted(async () => {
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useAuth } from '@/composables/useAuth.js'
+import { ref, computed, onMounted } from 'vue'
 
-// --- Auth de base via composable (fallback si absent)
-const auth = (typeof useAuth === 'function' ? useAuth() : {}) || {}
-const isAuthenticatedRef = auth.isAuthenticated ?? ref(false)
-const logoutFn = auth.logout ?? (() => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
-  window.location.reload()
-})
+const { isAuthenticated, logout } = useAuth()
 
-// --- Ã‰tat dÃ©rivÃ© depuis localStorage (rÃ´le / org / token)
-const roleRef = ref((localStorage.getItem('role') || '').toLowerCase())
-const hasOrg = computed(() => !!localStorage.getItem('organization_id'))
-const isAuth = computed(() => !!isAuthenticatedRef.value || !!localStorage.getItem('token'))
-
-const isAdmin = computed(() => roleRef.value === 'administrator' || roleRef.value === 'admin')
-const isOperator = computed(() => roleRef.value === 'operator')
-
-// --- Sync localStorage â†’ refs
-function syncFromLocalStorage() {
-  roleRef.value = (localStorage.getItem('role') || '').toLowerCase()
-}
-function onStorage(e) {
-  if (['role', 'organization_id', 'token', 'user'].includes(e.key)) {
-    syncFromLocalStorage()
-  }
-}
-
-// --- ThÃ¨me
+// Light / Dark theme
 const theme = ref(localStorage.getItem('theme') || 'dark')
 const isDark = computed(() => theme.value === 'dark')
 function toggleTheme() {
@@ -3308,20 +3289,8 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', theme.value)
   localStorage.setItem('theme', theme.value)
 }
-
-// --- Actions
-function doLogout() {
-  logoutFn()
-}
-
 onMounted(() => {
   document.documentElement.setAttribute('data-theme', theme.value)
-  window.addEventListener('storage', onStorage)
-  syncFromLocalStorage()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('storage', onStorage)
 })
 </script>
 
@@ -3336,40 +3305,382 @@ onBeforeUnmount(() => {
   --primary-hover: #008a8a;
 }
 
+/* Navbar styles */
 .navbar {
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 1000;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px; height: 64px;
+  padding: 0 32px;
+  height: 64px;
   background-color: var(--bg-dark);
   border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
 }
-.nav-left { display: flex; align-items: center; gap: 24px; }
-.brand { font-weight: 700; font-size: 18px; color: var(--primary-accent); text-decoration: none; }
-.brand:hover { color: var(--primary-hover); }
+
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Left side */
+.nav-left {
+  display: flex; align-items: center; gap: 24px;
+}
+
+.brand {
+  font-weight: bold; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.brand:hover {
+  color: var(--primary-hover);
+}
+
 .nav-link {
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
   padding: 8px 12px;
   border-radius: 4px;
-  transition: all .2s ease;
-  background: none; border: none; cursor: pointer;
+  transition: all 0.2s ease;
 }
-.nav-link:hover, .nav-link.active { color: var(--primary-accent); background-color: rgba(0,194,194,.1); }
-.nav-link.active { font-weight: 600; }
-.nav-right { margin-left: auto; }
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active {
+  font-weight: 600;
+}
+
+/* Right side - theme toggle */
+.nav-right {
+  margin-left: auto;
+}
 .theme-toggle {
   background: none; border: none;
   color: var(--text-secondary);
-  cursor: pointer; font-size: 1.25rem; padding: 8px;
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
   border-radius: 50%;
+  transition: background-color 0.2s ease;
 }
-.theme-toggle:hover { background-color: var(--divider-grey); color: var(--text-primary); }
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover {
+  background-color: rgba(0,0,0,0.05);
+}
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigation.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
+<!-- src/frontend/src/components/TopNavigationOperator.vue -->
+<template>
+    <nav class="navbar">
+      <!-- Left: brand + liens -->
+      <div class="nav-left">
+        <router-link to="/" class="brand">NetSecure-IQ</router-link>
+        <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+  
+        <!-- non connectÃ© -->
+        <template v-if="!isAuthenticated">
+          <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+          <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+        </template>
+  
+        <!-- connectÃ© (operator) -->
+        <template v-else>
+          <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+  
+          <router-link
+            to="/routertable"
+            class="nav-link"
+            :class="{ active: $route.path === '/routertable' }"
+          >RouterTable</router-link>
+  
+          <router-link
+            to="/organization"
+            class="nav-link"
+            :class="{ active: $route.path === '/organization' }"
+          >Organisation</router-link>
+  
+          <!-- Add User seulement si rattachÃ© Ã  une organisation -->
+          <router-link
+            v-if="hasOrganization"
+            to="/adduser"
+            class="nav-link"
+            :class="{ active: $route.path === '/adduser' }"
+          >Add User</router-link>
+  
+          <!-- Agents & PrÃ©-enreg. visibles uniquement si org -->
+          <router-link
+            v-if="hasOrganization"
+            to="/agents"
+            class="nav-link"
+            :class="{ active: $route.path === '/agents' }"
+          >Agents</router-link>
+  
+          <router-link
+            v-if="hasOrganization"
+            to="/agents/register"
+            class="nav-link"
+            :class="{ active: $route.path === '/agents/register' }"
+          >PrÃ©-enregistrement Agent</router-link>
+  
+          <button @click="logout" class="nav-link">Logout</button>
+        </template>
+      </div>
+  
+      <!-- Right: Theme toggle -->
+      <div class="nav-right">
+        <button
+          class="theme-toggle"
+          @click="toggleTheme"
+          :aria-label="isDark ? 'Passer au thÃ¨me clair' : 'Passer au thÃ¨me sombre'"
+        >
+          <span v-if="isDark">â˜€ï¸</span>
+          <span v-else>ðŸŒ™</span>
+        </button>
+      </div>
+    </nav>
+  </template>
+  
+  <script setup>
+  import { useAuth } from '@/composables/useAuth.js'
+  import { ref, computed, onMounted, onUnmounted } from 'vue'
+  
+  const { isAuthenticated, logout } = useAuth()
+  
+  /** Organisation: reactive via localStorage + events */
+  const organizationId = ref(localStorage.getItem('organization_id') || '')
+  const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+  function syncOrgId() {
+    organizationId.value = localStorage.getItem('organization_id') || ''
+  }
+  
+  /** ThÃ¨me */
+  const theme = ref(localStorage.getItem('theme') || 'dark')
+  const isDark = computed(() => theme.value === 'dark')
+  function toggleTheme() {
+    theme.value = isDark.value ? 'light' : 'dark'
+    document.documentElement.setAttribute('data-theme', theme.value)
+    localStorage.setItem('theme', theme.value)
+  }
+  
+  onMounted(() => {
+    document.documentElement.setAttribute('data-theme', theme.value)
+    window.addEventListener('storage', syncOrgId)
+    window.addEventListener('auth-changed', syncOrgId)
+  })
+  onUnmounted(() => {
+    window.removeEventListener('storage', syncOrgId)
+    window.removeEventListener('auth-changed', syncOrgId)
+  })
+  </script>
+  
+  <style scoped>
+  :root {
+    --bg-dark: #0e111a;
+    --panel-grey: #1a1d26;
+    --divider-grey: #2a2d36;
+    --text-primary: #f5f7fa;
+    --text-secondary: #9ca3af;
+    --primary-accent: #00b4aa;
+    --primary-hover: #008a8a;
+  }
+  
+  /* Navbar */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px;
+    height: 64px;
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--divider-grey);
+    transition: background-color 0.3s ease;
+  }
+  [data-theme='light'] .navbar {
+    background-color: #ffffff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+  
+  /* Left side */
+  .nav-left { display: flex; align-items: center; gap: 24px; }
+  .brand {
+    font-weight: bold; font-size: 18px;
+    color: var(--primary-accent);
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+  .brand:hover { color: var(--primary-hover); }
+  
+  .nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background: transparent;
+    border: none; /* pour le bouton Logout */
+    cursor: pointer;
+  }
+  .nav-link:hover,
+  .nav-link.active {
+    color: var(--primary-accent);
+    background-color: rgba(0,194,194,0.1);
+  }
+  .nav-link.active { font-weight: 600; }
+  
+  /* Right side - theme toggle */
+  .nav-right { margin-left: auto; }
+  .theme-toggle {
+    background: none; border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.25rem; padding: 8px;
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+  }
+  .theme-toggle:hover {
+    background-color: var(--divider-grey);
+    color: var(--text-primary);
+  }
+  [data-theme='light'] .theme-toggle:hover {
+    background-color: rgba(0,0,0,0.05);
+  }
+  </style>
+  
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
+<template>
+    <nav class="navbar">
+      <!-- Left: brand + liens -->
+      <div class="nav-left">
+        <router-link to="/" class="brand">NetSecure-IQ</router-link>
+        <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+  
+        <template v-if="!isAuthenticated">
+          <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+          <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+        </template>
+  
+        <!-- Version USER : liens minimalistes -->
+        <template v-else>
+          <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+          <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
+          <button @click="logout" class="nav-link">Logout</button>
+        </template>
+      </div>
+  
+      <!-- Right: theme -->
+      <div class="nav-right">
+        <button
+          class="theme-toggle"
+          @click="toggleTheme"
+          :aria-label="isDark ? 'Passer au thÃ¨me clair' : 'Passer au thÃ¨me sombre'"
+        >
+          <span v-if="isDark">â˜€ï¸</span>
+          <span v-else>ðŸŒ™</span>
+        </button>
+      </div>
+    </nav>
+  </template>
+  
+  <script setup>
+  import { useAuth } from '@/composables/useAuth.js'
+  import { ref, computed, onMounted } from 'vue'
+  
+  const { isAuthenticated, logout } = useAuth()
+  
+  // ThÃ¨me
+  const theme = ref(localStorage.getItem('theme') || 'dark')
+  const isDark = computed(() => theme.value === 'dark')
+  function toggleTheme() {
+    theme.value = isDark.value ? 'light' : 'dark'
+    document.documentElement.setAttribute('data-theme', theme.value)
+    localStorage.setItem('theme', theme.value)
+  }
+  onMounted(() => {
+    document.documentElement.setAttribute('data-theme', theme.value)
+  })
+  </script>
+  
+  <style scoped>
+  :root {
+    --bg-dark: #0e111a;
+    --panel-grey: #1a1d26;
+    --divider-grey: #2a2d36;
+    --text-primary: #f5f7fa;
+    --text-secondary: #9ca3af;
+    --primary-accent: #00b4aa;
+    --primary-hover: #008a8a;
+  }
+  
+  /* Navbar */
+  .navbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px; height: 64px;
+    background-color: var(--bg-dark);
+    border-bottom: 1px solid var(--divider-grey);
+    transition: background-color 0.3s ease;
+  }
+  [data-theme='light'] .navbar {
+    background-color: #ffffff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+  
+  .nav-left { display: flex; align-items: center; gap: 24px; }
+  
+  .brand {
+    font-weight: 700; font-size: 18px;
+    color: var(--primary-accent);
+    text-decoration: none;
+  }
+  .brand:hover { color: var(--primary-hover); }
+  
+  .nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background: transparent;
+  }
+  .nav-link:hover,
+  .nav-link.active {
+    color: var(--primary-accent);
+    background-color: rgba(0,194,194,0.1);
+  }
+  .nav-link.active { font-weight: 600; }
+  .nav-link.button { border: none; cursor: pointer; }
+  
+  .nav-right { margin-left: auto; }
+  .theme-toggle {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1.25rem; padding: 8px; border-radius: 50%;
+  }
+  .theme-toggle:hover {
+    background-color: var(--divider-grey); color: var(--text-primary);
+  }
+  [data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+  </style>
+  
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
 import { ref } from 'vue';
@@ -3477,53 +3788,6 @@ export default router
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\router\index.js =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\auth.js =====
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import axios from 'axios'
-
-export const useAuthStore = defineStore('auth', () => {
-  const user = ref(null)
-  const permissions = ref([])
-  const isLoading = ref(false)
-  const isAuthenticated = ref(false)
-  const error = ref(null)
-
-  async function fetchMe() {
-    isLoading.value = true
-    try {
-      const { data } = await axios.get('/api/auth/me')
-      user.value = data
-      permissions.value = data.permissions || []
-      isAuthenticated.value = true
-      error.value = null
-    } catch (err) {
-      user.value = null
-      permissions.value = []
-      isAuthenticated.value = false
-      error.value = err
-    } finally {
-      isLoading.value = false
-    }
-  }
-
-  function has(permission) {
-    return permissions.value.includes(permission)
-  }
-
-  function logout() {
-    localStorage.removeItem('token')
-    user.value = null
-    permissions.value = []
-    isAuthenticated.value = false
-    window.location.reload()
-  }
-
-  return { user, permissions, isLoading, isAuthenticated, error, fetchMe, has, logout }
-})
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\auth.js =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -3626,96 +3890,91 @@ export const useSiteStore = defineStore('site', {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
 <template>
-  <section class="panel">
-    <header class="header">
-      <h2>Agents MikroTik</h2>
-      <div class="actions">
-        <router-link to="/agents/register" class="btn">PrÃ©-enregistrer</router-link>
-        <button class="btn" :disabled="!canManage || !selected" @click="associate">Associate</button>
-        <button class="btn" :disabled="!canManage || !selected" @click="deactivate">Deactivate</button>
-        <button class="btn danger" :disabled="!canManage || !selected" @click="remove">Delete</button>
-      </div>
-    </header>
-
-    <table class="table">
+  <div class="agent-dashboard">
+    <h1>Gestion des agents MikroTik</h1>
+    <div class="actions">
+      <button :disabled="!selectedAgent" @click="onAssociate">Associer</button>
+      <button :disabled="!selectedAgent" @click="onDeactivate">DÃ©sactiver</button>
+      <button :disabled="!selectedAgent" @click="onDelete">Supprimer</button>
+      <router-link to="/agents/register"><button>PrÃ©-enregistrer un agent</button></router-link>
+    </div>
+    <table class="agent-table">
       <thead>
         <tr>
-          <th></th>
-          <th>MAC</th>
+          <th>SÃ©lection</th>
+          <th>MAC Adresse</th>
+          <th>Statut</th>
+          <th>Organisation</th>
           <th>Site</th>
-          <th>IP VPN</th>
-          <th>Status</th>
-          <th>Last Seen</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="a in agents" :key="a.id" @click="selected = a" :class="{ selected: selected?.id===a.id }">
-          <td><input type="radio" name="sel" :checked="selected?.id===a.id" /></td>
-          <td>{{ a.mac_address }}</td>
-          <td>{{ a.site_name || 'â€”' }}</td>
-          <td>{{ a.vpn_internal_ip || 'â€”' }}</td>
-          <td><span :class="badgeClass(a)">{{ a.provisioning_status }}</span></td>
-          <td>{{ a.last_online_at ? new Date(a.last_online_at).toLocaleString() : 'â€”' }}</td>
+        <tr v-for="agent in agents" :key="agent.mac" :class="[statusClass(agent.status), {selected: agent === selectedAgent}]" @click="selectAgent(agent)">
+          <td><input type="radio" :checked="agent === selectedAgent" /></td>
+          <td>{{ agent.mac }}</td>
+          <td><span :class="statusBadgeClass(agent.status)">{{ agent.statusLabel }}</span></td>
+          <td>{{ agent.organization || '-' }}</td>
+          <td>{{ agent.site || '-' }}</td>
         </tr>
       </tbody>
     </table>
-  </section>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import api from '@/utils/api'
-import { useAuth } from '@/composables/useAuth'
+import { ref } from 'vue';
 
-const agents = ref([])
-const selected = ref(null)
+const agents = ref([
+  { mac: 'AA:BB:CC:DD:EE:01', status: 'associated', organization: 'Org1', site: 'SiteA' },
+  { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated' },
+  { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated', organization: 'Org2' },
+]);
+const selectedAgent = ref(null);
 
-const { roleName, user } = useAuth()
-
-// Ã©vite un crash si roleName n'est pas encore initialisÃ©
-const canManage = computed(() => {
-  const r = roleName?.value || 'User'
-  return r === 'Admin' || r === 'Operator'
-})
-
-function badgeClass(a) {
-  const s = (a.provisioning_status || '').toUpperCase()
-  return s === 'ACTIVE' || s === 'ASSOCIATED' ? 'b-green'
-       : s === 'DEACTIVATED' ? 'b-red'
-       : 'b-orange'
+function selectAgent(agent) {
+  selectedAgent.value = agent;
 }
-
-async function load() {
-  const params = {}
-  const orgId = user?.value?.organization_id
-  if ((roleName?.value === 'Operator') && orgId) params.organization_id = orgId
-
-  const { data } = await api.get('/agents', { params })
-  agents.value = data || []
+function statusClass(status) {
+  return {
+    'row-associated': status === 'associated',
+    'row-unassociated': status === 'unassociated',
+    'row-deactivated': status === 'deactivated',
+  };
 }
-
-onMounted(load)
+function statusBadgeClass(status) {
+  return {
+    badge: true,
+    'badge-green': status === 'associated',
+    'badge-orange': status === 'unassociated',
+    'badge-red': status === 'deactivated',
+  };
+}
+function onAssociate() {
+  // TODO: implÃ©menter
+}
+function onDeactivate() {
+  // TODO: implÃ©menter
+}
+function onDelete() {
+  // TODO: implÃ©menter
+}
 </script>
 
-
 <style scoped>
-.panel { max-width: 1100px; margin: 90px auto 40px; background: #11161f; border: 1px solid #2a2d36; padding: 16px 20px; border-radius: 8px; }
-.header { display:flex; align-items:center; justify-content:space-between; }
-.actions { display:flex; gap:10px; }
-.table { width:100%; margin-top: 12px; border-collapse: collapse; }
-th, td { padding: 10px 8px; border-bottom: 1px solid #2a2d36; }
-tr.selected { background: rgba(255,255,255,0.04); }
-.btn { background:#00b4aa; border:none; color:white; padding:8px 12px; border-radius:6px; text-decoration:none; cursor:pointer; }
-.btn.danger { background:#b43b3b; }
-.b-green { color:#1abc9c; font-weight:600; }
-.b-red { color:#e74c3c; font-weight:600; }
-.b-orange { color:#f39c12; font-weight:600; }
+.agent-dashboard { padding: 2rem; }
+.actions { margin-bottom: 1rem; display: flex; gap: 1rem; }
+.agent-table { width: 100%; border-collapse: collapse; }
+.agent-table th, .agent-table td { padding: 0.5rem 1rem; border-bottom: 1px solid #222; }
+.row-associated { background: #e8fbe8; }
+.row-unassociated { background: #fff8e1; }
+.row-deactivated { background: #fdeaea; }
+.selected { outline: 2px solid #1976d2; }
+.badge { padding: 0.2em 0.7em; border-radius: 1em; font-weight: bold; }
+.badge-green { background: #4caf50; color: #fff; }
+.badge-orange { background: #ff9800; color: #fff; }
+.badge-red { background: #f44336; color: #fff; }
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
@@ -3728,122 +3987,93 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\RegisterAgent.vue =====
 <template>
-  <section class="panel">
-    <h2>PrÃ©-enregistrement dâ€™un agent MikroTik</h2>
-
-    <form @submit.prevent="startProvision">
-      <label>MAC address (ether1)</label>
-      <input v-model.trim="mac" placeholder="AA:BB:CC:DD:EE:FF" required />
-      <div class="actions">
-        <button type="submit" :disabled="loading || !isValidMac">GÃ©nÃ©rer le script</button>
-      </div>
+  <div class="register-agent-page">
+    <BackgroundParticles />
+    <div class="register-agent">
+    <h1>PrÃ©-enregistrement dâ€™un agent MikroTik</h1>
+    <form @submit.prevent="onSubmit">
+      <label for="mac">Adresse MAC principale (ether1):</label>
+      <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
+      <button type="submit" :disabled="loading">GÃ©nÃ©rer le script</button>
     </form>
-
-    <div v-if="loading" class="hint">GÃ©nÃ©ration en coursâ€¦</div>
-
-    <div v-if="agent" class="result">
-      <h3>Script gÃ©nÃ©rÃ©</h3>
-      <textarea readonly :value="agent.script" rows="12"></textarea>
+    <div v-if="loading" class="loading">GÃ©nÃ©ration du script...</div>
+    <div v-if="script">
+      <label>Script gÃ©nÃ©rÃ© :</label>
+      <textarea readonly rows="8" :value="script"></textarea>
       <div class="actions">
         <button @click="copyScript">Copier</button>
         <button @click="downloadScript">TÃ©lÃ©charger</button>
+        <button @click="testAgent" :disabled="testing">Test</button>
+        <button @click="cancelRegistration" :disabled="testing">Annuler lâ€™inscription</button>
       </div>
-
-      <h3>Test de connectivitÃ© VPN</h3>
-      <p>IP interne assignÃ©e : <code>{{ agent.vpn_internal_ip }}</code></p>
-      <div class="actions">
-        <button :disabled="testing" @click="testAgent">Tester</button>
-        <button :disabled="testing" class="secondary" @click="cancel">Annuler lâ€™enregistrement</button>
-      </div>
-
-      <p v-if="testOk === true" class="ok">âœ… Test OK â€” redirection vers la liste dâ€™agentsâ€¦</p>
-      <p v-else-if="testOk === false" class="ko">âŒ Ã‰chec du test. VÃ©rifie la connectivitÃ© et rÃ©essaie.</p>
+      <div v-if="testing" class="loading">Test de connexion...</div>
+      <div v-if="testResult === true" class="success">Agent en ligne, peer dÃ©sactivÃ© et retour Ã  la liste.</div>
+      <div v-if="testResult === false" class="error">Ã‰chec du test, vÃ©rifiez la connexion de lâ€™agent.</div>
     </div>
-  </section>
+  </div>
+    </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
-import api from '@/utils/api'
-import { useAuth } from '@/composables/useAuth'
+import BackgroundParticles from '@/components/BackgroundParticles.vue';
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 
-const router = useRouter()
-const { user } = useAuth()
+const mac = ref('');
+const script = ref('');
+const loading = ref(false);
+const testing = ref(false);
+const testResult = ref(null);
+const router = useRouter();
 
-const mac = ref('')
-const loading = ref(false)
-const agent = ref(null) // { id, vpn_internal_ip, script, ... }
-const testing = ref(false)
-const testOk = ref(null)
-
-const isValidMac = computed(() =>
-  /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(mac.value)
-)
-
-async function startProvision() {
-  loading.value = true
-  try {
-    const payload = { mac_address: mac.value }
-    if (user.value?.organization_id) payload.organization_id = user.value.organization_id
-    const { data } = await api.post('/agents/pre-register', payload)
-    agent.value = data
-  } finally {
-    loading.value = false
-  }
+function onSubmit() {
+  loading.value = true;
+  setTimeout(() => {
+    // Simuler la gÃ©nÃ©ration de script
+    script.value = `/interface/wireguard/add listen-port=13231 private-key=...\n/interface/wireguard/peers/add public-key=... allowed-address=...`; 
+    loading.value = false;
+  }, 1500);
 }
-
-async function copyScript() {
-  if (!agent.value?.script) return
-  await navigator.clipboard.writeText(agent.value.script)
-  alert('Script copiÃ©.')
+function copyScript() {
+  navigator.clipboard.writeText(script.value);
 }
-
 function downloadScript() {
-  if (!agent.value?.script) return
-  const blob = new Blob([agent.value.script], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `mikrotik_provision_${agent.value.id || mac.value.replaceAll(':','-')}.rsc`
-  a.click()
-  URL.revokeObjectURL(url)
+  const blob = new Blob([script.value], { type: 'text/plain' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `mikrotik-script-${mac.value}.rsc`;
+  link.click();
 }
-
-async function testAgent() {
-  if (!agent.value?.id) return
-  testing.value = true
-  testOk.value = null
-  try {
-    const { data } = await api.post(`/agents/${agent.value.id}/test`)
-    testOk.value = !!data?.ok
-    if (testOk.value) setTimeout(() => router.push('/agents'), 900)
-  } catch {
-    testOk.value = false
-  } finally {
-    testing.value = false
-  }
+function testAgent() {
+  testing.value = true;
+  testResult.value = null;
+  setTimeout(() => {
+    // Simuler le test (ping)
+    const success = Math.random() > 0.5;
+    testResult.value = success;
+    testing.value = false;
+    if (success) {
+      // Simuler dÃ©sactivation peer cÃ´tÃ© backend et retour Ã  la liste
+      setTimeout(() => router.push('/agents'), 1000);
+    }
+  }, 1500);
 }
-
-async function cancel() {
-  if (!agent.value?.id) return
-  try { await api.delete(`/agents/${agent.value.id}`) } finally { router.push('/agents') }
+function cancelRegistration() {
+  script.value = '';
+  mac.value = '';
+  testResult.value = null;
 }
 </script>
 
 <style scoped>
-.panel { max-width: 860px; margin: 90px auto 40px; background: #11161f; border: 1px solid #2a2d36; padding: 24px; border-radius: 8px; }
-h2, h3 { margin: 0 0 12px; }
-label { display:block; margin-bottom:6px; color:#9ca3af; }
-input, textarea { width: 100%; background:#0e111a; color:#f5f7fa; border:1px solid #2a2d36; border-radius:6px; padding:10px 12px; }
-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-.actions { display:flex; gap:12px; margin:12px 0; }
-button { background:#00b4aa; border:none; color:white; padding:8px 14px; border-radius:6px; cursor:pointer; }
-button.secondary { background:transparent; color:#9ca3af; border:1px solid #2a2d36; }
-.hint { margin-top: 12px; color:#9ca3af; }
-.ok { color: #1abc9c; } .ko { color: #e74c3c; }
-.result { margin-top: 18px; }
-code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }
+.register-agent { padding: 2rem; max-width: 600px; margin: auto; }
+form { margin-bottom: 1rem; }
+input { margin-right: 1rem; }
+textarea { width: 100%; margin-bottom: 1rem; }
+.actions { display: flex; gap: 1rem; }
+.loading { color: #1976d2; font-weight: bold; }
+.success { color: #4caf50; font-weight: bold; }
+.error { color: #f44336; font-weight: bold; }
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\RegisterAgent.vue =====

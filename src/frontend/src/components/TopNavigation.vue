@@ -1,3 +1,4 @@
+<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
 <template>
   <nav class="navbar">
     <!-- Left side: Brand and navigation links -->
@@ -11,7 +12,7 @@
         <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
       </template>
 
-      <!-- connecté -->
+      <!-- connecté (ADMIN) -->
       <template v-else>
         <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
         <router-link to="/organizationForm" class="nav-link" :class="{ active: $route.path === '/organizationForm' }">Organisation</router-link>
@@ -26,8 +27,14 @@
       </template>
     </div>
 
-    <!-- Right side: Theme toggle -->
+    <!-- Right side: role badge + Theme toggle -->
     <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="Vous êtes connecté en tant qu'administrateur">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Admin connecté</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
       <button 
         class="theme-toggle" 
         @click="toggleTheme" 
@@ -42,11 +49,18 @@
 
 <script setup>
 import { useAuth } from '@/composables/useAuth.js'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
 
-// Light / Dark theme
+/** Organisation: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Light / Dark theme */
 const theme = ref(localStorage.getItem('theme') || 'dark')
 const isDark = computed(() => theme.value === 'dark')
 function toggleTheme() {
@@ -54,8 +68,15 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', theme.value)
   localStorage.setItem('theme', theme.value)
 }
+
 onMounted(() => {
   document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
 })
 </script>
 
@@ -68,6 +89,7 @@ onMounted(() => {
   --text-secondary: #9ca3af;
   --primary-accent: #00b4aa;
   --primary-hover: #008a8a;
+  --success: #22c55e;
 }
 
 /* Navbar styles */
@@ -82,26 +104,20 @@ onMounted(() => {
   border-bottom: 1px solid var(--divider-grey);
   transition: background-color 0.3s ease;
 }
-
 [data-theme='light'] .navbar {
   background-color: #ffffff;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
 /* Left side */
-.nav-left {
-  display: flex; align-items: center; gap: 24px;
-}
-
+.nav-left { display: flex; align-items: center; gap: 24px; }
 .brand {
   font-weight: bold; font-size: 18px;
   color: var(--primary-accent);
   text-decoration: none;
   transition: color 0.2s ease;
 }
-.brand:hover {
-  color: var(--primary-hover);
-}
+.brand:hover { color: var(--primary-hover); }
 
 .nav-link {
   color: var(--text-secondary);
@@ -110,20 +126,38 @@ onMounted(() => {
   padding: 8px 12px;
   border-radius: 4px;
   transition: all 0.2s ease;
+  background: transparent;
+  border: none; /* pour le bouton Logout */
+  cursor: pointer;
 }
 .nav-link:hover,
 .nav-link.active {
   color: var(--primary-accent);
   background-color: rgba(0,194,194,0.1);
 }
-.nav-link.active {
-  font-weight: 600;
-}
+.nav-link.active { font-weight: 600; }
 
-/* Right side - theme toggle */
-.nav-right {
-  margin-left: auto;
+/* Right side */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+/* Role badge */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary);
+  font-size: 12px;
 }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Theme toggle */
 .theme-toggle {
   background: none; border: none;
   color: var(--text-secondary);

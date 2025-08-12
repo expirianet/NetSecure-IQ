@@ -48,7 +48,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../../composables/useAuth'
+import { useAuth } from '../composables/useAuth'
 
 const email = ref('')
 const password = ref('')
@@ -63,11 +63,9 @@ const { login: setAuthLogin } = useAuth()
  */
 function renderParticles() {
   const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  // supprime ancien canvas
   const old = document.querySelector('#particles-js > canvas')
   if (old) old.remove()
 
-  // (re)lance particlesJS
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -100,15 +98,13 @@ function renderParticles() {
   })
 }
 
-// Function to ensure particles are loaded after DOM and theme are ready
+// S'assure que particles est chargé après le DOM et le thème
 async function initializeParticles() {
-  // Ensure the particles container exists
   if (!document.getElementById('particles-js')) {
     await new Promise(resolve => setTimeout(resolve, 50));
     return initializeParticles();
   }
-  
-  // Load particles script if not already loaded
+
   if (!window.particlesJS) {
     await new Promise((resolve) => {
       const script = document.createElement('script');
@@ -117,13 +113,10 @@ async function initializeParticles() {
       document.body.appendChild(script);
     });
   }
-  
-  // Ensure theme is applied
+
   await nextTick();
-  
   renderParticles();
-  
-  // Set up theme change observer
+
   const obs = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.attributeName === 'data-theme') {
@@ -131,8 +124,6 @@ async function initializeParticles() {
       }
     }
   });
-
-  // Observe theme changes on document.documentElement
   obs.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-theme']
@@ -169,13 +160,14 @@ const login = async () => {
     localStorage.setItem('role', data.role?.toLowerCase() || '')
     localStorage.setItem('organization_id', data.organization_id || '')
 
+    // >>> IMPORTANT : informer l'app qu'on vient de se loguer (maj de la nav)
+    window.dispatchEvent(new Event('auth-changed'))
+
     // Choix de la redirection
     let redirectTo = '/dashboard'
     const role = data.role?.toLowerCase()
     if (role === 'user') redirectTo = '/routertable'
-    else if (role === 'operator' && !data.organization_id)
-    redirectTo = '/organization/edit'
-
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
 
     if (typeof setAuthLogin === 'function') setAuthLogin();
     setTimeout(() => router.push(redirectTo), 200)

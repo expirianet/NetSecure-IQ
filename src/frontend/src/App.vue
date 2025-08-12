@@ -1,8 +1,8 @@
 <template>
   <div id="app">
-    <!-- Barre de navigation personnalisée -->
-    <TopNavigation />
-    
+    <!-- Barre de navigation (switch auto selon le rôle) -->
+    <component :is="navComponent" />
+
     <!-- Contenu principal -->
     <main class="main-content">
       <router-view />
@@ -10,31 +10,45 @@
 
     <!-- Canvas pour particles.js -->
     <div id="particles-js"></div>
-    <!-- Le bouton de basculement de thème a été supprimé -->
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
-import TopNavigation from '@/components/navigation/TopNavigation.vue'
-// -- État du thème
-const theme = ref(localStorage.getItem('theme') || 'dark')
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import TopNavigation from '@/components/TopNavigation.vue'
+import TopNavigationUser from '@/components/TopNavigationUser.vue'
+import TopNavigationOperator from '@/components/TopNavigationOperator.vue'
 
-// -- Mettre à jour l'attribut data-theme sur <html>
-watch(theme, (newTheme) => {
-  document.documentElement.setAttribute('data-theme', newTheme)
+/* ---------- Rôle & navigation ---------- */
+const role = ref(localStorage.getItem('role') || '')
+
+const navComponent = computed(() => {
+  if (role.value === 'user') return TopNavigationUser
+  if (role.value === 'operator') return TopNavigationOperator
+  return TopNavigation // admin / défaut
 })
 
-// -- Fonction d'initialisation de particles.js
+function updateRoleFromStorage() {
+  role.value = localStorage.getItem('role') || ''
+}
+
+/* ---------- Thème ---------- */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+
+watch(theme, (newTheme) => {
+  document.documentElement.setAttribute('data-theme', newTheme)
+  localStorage.setItem('theme', newTheme)
+})
+
+/* ---------- particles.js ---------- */
 function initParticles() {
   const dark = theme.value === 'dark'
   if (!window.particlesJS) return
 
-  // Destruction de l'ancien canvas
+  // Détruire l'ancien canvas
   const oldCanvas = document.querySelector('#particles-js > canvas')
   if (oldCanvas) oldCanvas.remove()
 
-  // Configuration des particules
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -67,32 +81,49 @@ function initParticles() {
   })
 }
 
-// -- Monter le composant
-onMounted(() => {
-  // Appliquer d'abord le thème
+function attachThemeObserver() {
+  const observer = new MutationObserver(() => initParticles())
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme']
+  })
+  return observer
+}
+
+/* ---------- Lifecycle ---------- */
+let themeObserver
+
+onMounted(async () => {
+  // Appliquer le thème
   document.documentElement.setAttribute('data-theme', theme.value)
 
-  // Charger dynamiquement particles.min.js si nécessaire
+  // Charger particles si nécessaire
   if (!window.particlesJS) {
     const script = document.createElement('script')
     script.src = '/particles/particles.min.js'
     script.onload = () => {
       initParticles()
-      const observer = new MutationObserver(() => initParticles())
-      observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme']
-      })
+      themeObserver = attachThemeObserver()
     }
     document.body.appendChild(script)
   } else {
     initParticles()
-    const observer = new MutationObserver(() => initParticles())
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme']
-    })
+    themeObserver = attachThemeObserver()
   }
+
+  // Écoutes pour mettre à jour la nav quand l’auth change
+  window.addEventListener('storage', updateRoleFromStorage)
+  window.addEventListener('auth-changed', updateRoleFromStorage)
+
+  // S’assurer que la nav se rend correctement après le mount
+  await nextTick()
+  updateRoleFromStorage()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('storage', updateRoleFromStorage)
+  window.removeEventListener('auth-changed', updateRoleFromStorage)
+  if (themeObserver?.disconnect) themeObserver.disconnect()
 })
 </script>
 
@@ -141,32 +172,11 @@ body {
   box-sizing: border-box;
 }
 
-/* Reset des marges et paddings */
+/* Reset */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-/* Navbar */
-nav {
-  position: relative;
-  z-index: 20;
-  padding: 16px;
-  background-color: var(--panel-grey);
-  border-bottom: 1px solid var(--divider-grey);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.nav-links a {
-  margin: 0 8px;
-  color: var(--primary-accent);
-  text-decoration: none;
-}
-.nav-links a:hover {
-  color: var(--primary-hover);
 }
 
 /* Canvas particles */

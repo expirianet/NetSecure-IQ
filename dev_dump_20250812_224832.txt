@@ -152,8 +152,7 @@ func GenerateMikrotikScript(peer *Peer, mac string) string {
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import TopNavigation from '@/components/TopNavigation.vue'
-
+import TopNavigation from '@/components/navigation/TopNavigation.vue'
 // -- Ã‰tat du thÃ¨me
 const theme = ref(localStorage.getItem('theme') || 'dark')
 
@@ -1071,39 +1070,33 @@ function setupThemeObserver() {
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
 <template>
   <nav class="navbar">
-    <!-- Left side: Brand and navigation links -->
     <div class="nav-left">
       <router-link to="/" class="brand">NetSecure-IQ</router-link>
       <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
 
-      <!-- non connectÃ© -->
+      <!-- Logged OUT -->
       <template v-if="!isAuthenticated">
-        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
-        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+        <router-link :to="{ name: 'LoginForm' }" class="nav-link" :class="{ active: $route.name === 'LoginForm' }">Login</router-link>
+        <router-link :to="{ name: 'RegisterForm' }" class="nav-link" :class="{ active: $route.name === 'RegisterForm' }">Register</router-link>
       </template>
 
-      <!-- connectÃ© -->
+      <!-- Logged IN -->
       <template v-else>
         <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
-        <router-link to="/organizationForm" class="nav-link" :class="{ active: $route.path === '/organizationForm' }">Organisation</router-link>
+        <router-link to="/organization" class="nav-link" :class="{ active: $route.path === '/organization' }">Organisation</router-link>
         <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
         <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
         <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
         <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
-        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
-          PrÃ©-enregistrement Agent
-        </router-link>
-        <button @click="logout" class="nav-link">Logout</button>
+        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">PrÃ©-enregistrement</router-link>
+
+        <!-- The logout button is back -->
+        <button @click="onLogout" class="nav-link logout-btn">Logout</button>
       </template>
     </div>
 
-    <!-- Right side: Theme toggle -->
     <div class="nav-right">
-      <button 
-        class="theme-toggle" 
-        @click="toggleTheme" 
-        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
+      <button class="theme-toggle" @click="toggleTheme" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
         <span v-if="isDark">â˜€ï¸</span>
         <span v-else>ðŸŒ™</span>
       </button>
@@ -1113,11 +1106,19 @@ function setupThemeObserver() {
 
 <script setup>
 import { useAuth } from '@/composables/useAuth.js'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const { isAuthenticated, logout } = useAuth()
 
-// Light / Dark theme
+// keep navbar reactive to external changes to localStorage (login form / logout)
+const tick = ref(0)
+const bump = () => { tick.value++ }
+onMounted(() => window.addEventListener('auth-updated', bump))
+onBeforeUnmount(() => window.removeEventListener('auth-updated', bump))
+
+// Theme
 const theme = ref(localStorage.getItem('theme') || 'dark')
 const isDark = computed(() => theme.value === 'dark')
 function toggleTheme() {
@@ -1128,6 +1129,14 @@ function toggleTheme() {
 onMounted(() => {
   document.documentElement.setAttribute('data-theme', theme.value)
 })
+
+function onLogout() {
+  logout()           // clears storage + sends auth-updated + navigates to /login
+  // make sure router is in sync (optional safety)
+  if (router.currentRoute.value.path !== '/login') {
+    router.push('/login')
+  }
+}
 </script>
 
 <style scoped>
@@ -1141,75 +1150,33 @@ onMounted(() => {
   --primary-hover: #008a8a;
 }
 
-/* Navbar styles */
 .navbar {
-  position: fixed;
-  top: 0; left: 0; right: 0;
+  position: fixed; top: 0; left: 0; right: 0;
   z-index: 1000;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px;
-  height: 64px;
+  padding: 0 32px; height: 64px;
   background-color: var(--bg-dark);
   border-bottom: 1px solid var(--divider-grey);
-  transition: background-color 0.3s ease;
 }
 
-[data-theme='light'] .navbar {
-  background-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-/* Left side */
-.nav-left {
-  display: flex; align-items: center; gap: 24px;
-}
-
-.brand {
-  font-weight: bold; font-size: 18px;
-  color: var(--primary-accent);
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-.brand:hover {
-  color: var(--primary-hover);
-}
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand { font-weight: bold; font-size: 18px; color: var(--primary-accent); text-decoration: none; }
+.brand:hover { color: var(--primary-hover); }
 
 .nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 4px;
+  color: var(--text-secondary); text-decoration: none;
+  font-size: 14px; padding: 8px 12px; border-radius: 4px;
   transition: all 0.2s ease;
 }
-.nav-link:hover,
-.nav-link.active {
-  color: var(--primary-accent);
-  background-color: rgba(0,194,194,0.1);
-}
-.nav-link.active {
-  font-weight: 600;
-}
+.nav-link:hover, .nav-link.active { color: var(--primary-accent); background: rgba(0,194,194,0.1); }
+.logout-btn { background: none; border: none; cursor: pointer; }
 
-/* Right side - theme toggle */
-.nav-right {
-  margin-left: auto;
-}
+.nav-right { margin-left: auto; }
 .theme-toggle {
-  background: none; border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.25rem; padding: 8px;
-  border-radius: 50%;
-  transition: background-color 0.2s ease;
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 1.25rem; padding: 8px; border-radius: 50%;
 }
-.theme-toggle:hover {
-  background-color: var(--divider-grey);
-  color: var(--text-primary);
-}
-[data-theme='light'] .theme-toggle:hover {
-  background-color: rgba(0,0,0,0.05);
-}
+.theme-toggle:hover { background-color: var(--divider-grey); color: var(--text-primary); }
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
@@ -2320,7 +2287,7 @@ onMounted(async () => {
 </template>
 
 <script setup>
-import BackgroundParticles from './BackgroundParticles.vue';
+import BackgroundParticles from '../common/BackgroundParticles.vue';
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
@@ -2482,24 +2449,25 @@ createApp(App).use(router).mount('#app')
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\router\index.js =====
 import { createRouter, createWebHashHistory } from 'vue-router'
-import HomePage from '@/components/HomePage.vue'
+
+// Components/views (chemins corrigÃ©s)
+import HomePage from '@/components/home/HomePage.vue'
 import LoginForm from '@/views/auth/LoginForm.vue'
-import RegisterForm from '@/components/RegisterForm.vue'
+import RegisterForm from '@/views/auth/RegisterForm.vue'
 import DashboardPage from '@/views/dashboard/DashboardPage.vue'
-import OrganizationForm from '@/components/OrganizationForm.vue'
+import OrganizationForm from '@/components/organization/OrganizationForm.vue'
 import OrganizationProfile from '@/components/organization/OrganizationProfile.vue'
 import RouterTable from '@/components/organization/RouterTable.vue'
-import AddUserForm from '@/components/organization/AddUserForm.vue'
-import AddOperatorForm from '@/components/navigation/AddOperatorForm.vue'
-
+import AddOperatorForm from '@/components/forms/AddOperatorForm.vue'
+import AddUserForm from '@/components/forms/AddUserForm.vue'
 // Lazy views
 const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue');
 const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue');
 
 const routes = [
   { path: '/', component: HomePage },
-  { path: '/login', component: LoginForm },
-  { path: '/register', component: RegisterForm },
+  { path: '/login', name: 'LoginForm', component: LoginForm },
+  { path: '/register', name: 'RegisterForm', component: RegisterForm },
 
   // Commun Ã  tous les utilisateurs authentifiÃ©s
   { path: '/dashboard', component: DashboardPage, meta: { requiresAuth: true } },
@@ -2529,14 +2497,17 @@ const router = createRouter({
 })
 
 // Guard d'auth + rÃ´les ultra-simple basÃ© sur localStorage
+
+
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  const isAuthed = !!token
+  const raw = localStorage.getItem('token')
+  const isAuthed = !!(raw && raw !== 'undefined' && raw !== 'null')
 
   const rawRole = (localStorage.getItem('role') || '').toLowerCase()
-  // normalisation : certains endroits peuvent mettre "admin"
   const role = rawRole === 'admin' ? 'administrator' : rawRole
   const orgId = localStorage.getItem('organization_id') || ''
+  // ... rest unchanged
+
 
   // Bloque les pages protÃ©gÃ©es
   if (to.meta.requiresAuth && !isAuthed) {
@@ -2791,32 +2762,32 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
   <div class="register-agent-page">
     <BackgroundParticles />
     <div class="register-agent">
-    <h1>PrÃ©-enregistrement dâ€™un agent MikroTik</h1>
-    <form @submit.prevent="onSubmit">
-      <label for="mac">Adresse MAC principale (ether1):</label>
-      <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
-      <button type="submit" :disabled="loading">GÃ©nÃ©rer le script</button>
-    </form>
-    <div v-if="loading" class="loading">GÃ©nÃ©ration du script...</div>
-    <div v-if="script">
-      <label>Script gÃ©nÃ©rÃ© :</label>
-      <textarea readonly rows="8" :value="script"></textarea>
-      <div class="actions">
-        <button @click="copyScript">Copier</button>
-        <button @click="downloadScript">TÃ©lÃ©charger</button>
-        <button @click="testAgent" :disabled="testing">Test</button>
-        <button @click="cancelRegistration" :disabled="testing">Annuler lâ€™inscription</button>
+      <h1>PrÃ©-enregistrement dâ€™un agent MikroTik</h1>
+      <form @submit.prevent="onSubmit">
+        <label for="mac">Adresse MAC principale (ether1):</label>
+        <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
+        <button type="submit" :disabled="loading">GÃ©nÃ©rer le script</button>
+      </form>
+      <div v-if="loading" class="loading">GÃ©nÃ©ration du script...</div>
+      <div v-if="script">
+        <label>Script gÃ©nÃ©rÃ© :</label>
+        <textarea readonly rows="8" :value="script"></textarea>
+        <div class="actions">
+          <button @click="copyScript">Copier</button>
+          <button @click="downloadScript">TÃ©lÃ©charger</button>
+          <button @click="testAgent" :disabled="testing">Test</button>
+          <button @click="cancelRegistration" :disabled="testing">Annuler lâ€™inscription</button>
+        </div>
+        <div v-if="testing" class="loading">Test de connexion...</div>
+        <div v-if="testResult === true" class="success">Agent en ligne, peer dÃ©sactivÃ© et retour Ã  la liste.</div>
+        <div v-if="testResult === false" class="error">Ã‰chec du test, vÃ©rifiez la connexion de lâ€™agent.</div>
       </div>
-      <div v-if="testing" class="loading">Test de connexion...</div>
-      <div v-if="testResult === true" class="success">Agent en ligne, peer dÃ©sactivÃ© et retour Ã  la liste.</div>
-      <div v-if="testResult === false" class="error">Ã‰chec du test, vÃ©rifiez la connexion de lâ€™agent.</div>
     </div>
   </div>
-    </div>
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue';
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
@@ -2893,20 +2864,10 @@ textarea { width: 100%; margin-bottom: 1rem; }
           <h3 class="login-subtitle">Login to your account</h3>
 
           <form @submit.prevent="login" class="login-form">
-            <input
-              v-model="email"
-              type="email"
-              placeholder="Email address"
-              required
-            />
-            <input
-              v-model="password"
-              type="password"
-              placeholder="Password"
-              required
-            />
+            <input v-model="email" type="email" placeholder="Email address" required />
+            <input v-model="password" type="password" placeholder="Password" required />
             <button :disabled="loading" type="submit">
-              {{ loading ? "Loading..." : "Login" }}
+              {{ loading ? 'Loading...' : 'Login' }}
             </button>
           </form>
 
@@ -2915,10 +2876,7 @@ textarea { width: 100%; margin-bottom: 1rem; }
             <router-link to="/register">Register</router-link>
           </p>
 
-          <p
-            v-if="message"
-            :class="['login-message', successMessage ? 'success' : 'error']"
-          >
+          <p v-if="message" :class="['login-message', successMessage ? 'success' : 'error']">
             {{ message }}
           </p>
         </div>
@@ -2930,7 +2888,7 @@ textarea { width: 100%; margin-bottom: 1rem; }
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../../composables/useAuth'
+import { useAuth } from '@/composables/useAuth.js'
 
 const email = ref('')
 const password = ref('')
@@ -2940,16 +2898,12 @@ const loading = ref(false)
 const router = useRouter()
 const { login: setAuthLogin } = useAuth()
 
-/**
- * Initialise ou recharge particles.js en fonction du thÃ¨me actuel.
- */
+// Particles
 function renderParticles() {
   const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  // supprime ancien canvas
   const old = document.querySelector('#particles-js > canvas')
   if (old) old.remove()
 
-  // (re)lance particlesJS
   window.particlesJS('particles-js', {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -2982,64 +2936,48 @@ function renderParticles() {
   })
 }
 
-// Function to ensure particles are loaded after DOM and theme are ready
 async function initializeParticles() {
-  // Ensure the particles container exists
   if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
+    await new Promise(resolve => setTimeout(resolve, 50))
+    return initializeParticles()
   }
-  
-  // Load particles script if not already loaded
+
   if (!window.particlesJS) {
     await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
+      const script = document.createElement('script')
+      script.src = '/particles/particles.min.js'
+      script.onload = resolve
+      document.body.appendChild(script)
+    })
   }
-  
-  // Ensure theme is applied
-  await nextTick();
-  
-  renderParticles();
-  
-  // Set up theme change observer
+
+  await nextTick()
+  renderParticles()
+
   const obs = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.attributeName === 'data-theme') {
-        renderParticles();
+        renderParticles()
       }
     }
-  });
-
-  // Observe theme changes on document.documentElement
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  });
+  })
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 }
 
 onMounted(() => {
-  initializeParticles();
+  initializeParticles()
 })
 
 const login = async () => {
   loading.value = true
   try {
-    const res = await fetch(
-      `${process.env.VUE_APP_BACKEND_URL}/api/login`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.value,
-          password: password.value
-        })
-      }
-    )
-    const data = await res.json()
+    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value, password: password.value })
+    })
+
+    const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || data.message || 'Login failed')
 
     message.value = 'Login successful! Redirecting...'
@@ -3048,19 +2986,27 @@ const login = async () => {
     // Stockage token & infos
     localStorage.setItem('token', data.token)
     localStorage.setItem('user_id', data.user_id)
-    localStorage.setItem('role', data.role?.toLowerCase() || '')
+    localStorage.setItem('role', (data.role || '').toLowerCase())
     localStorage.setItem('organization_id', data.organization_id || '')
 
-    // Choix de la redirection
+    // informer le reste de l'app (Dashboard) que l'auth vient d'Ãªtre mise Ã  jour
+    window.dispatchEvent(new Event('auth-updated'))
+
+    // MAJ de l'Ã©tat du composable
+    setAuthLogin()
+
+    // Redirection
     let redirectTo = '/dashboard'
-    const role = data.role?.toLowerCase()
+    const role = (data.role || '').toLowerCase()
     if (role === 'user') redirectTo = '/routertable'
-    else if (role === 'operator' && !data.organization_id)
-    redirectTo = '/organization/edit'
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
 
-
-    if (typeof setAuthLogin === 'function') setAuthLogin();
-    setTimeout(() => router.push(redirectTo), 200)
+    // si on est dÃ©jÃ  sur la mÃªme route, force un refresh logique
+    if (router.currentRoute.value.path === redirectTo) {
+      router.replace({ path: redirectTo, query: { t: Date.now().toString() } })
+    } else {
+      router.push(redirectTo)
+    }
   } catch (err) {
     message.value = 'Error: ' + err.message
     successMessage.value = false
