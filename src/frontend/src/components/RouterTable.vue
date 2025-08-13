@@ -1,113 +1,159 @@
+<!-- src/frontend/src/components/RouterTable.vue -->
 <template>
-  <div class="router-table-page">
+  <div class="routers-page">
     <BackgroundParticles />
-    <h2 style="margin-bottom: 1rem;">Router Status Table</h2>
-    <table class="router-table" v-if="Array.isArray(routers) && routers.length">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>MAC Address</th>
-          <th>Status</th>
-          <th>Timestamp</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(router, index) in routers" :key="router.mac">
-          <td>{{ index + 1 }}</td>
-          <td>{{ router.mac }}</td>
-          <td :class="router.status === 'online' ? 'online' : 'offline'">{{ router.status }}</td>
-          <td>{{ formatDate(router.time) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else>No routers found.</p>
+
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <!-- En-tête très simple -->
+          <div class="header-row">
+            <h2>Router Status Table</h2>
+            <button class="btn ghost" @click="loadRouters" :disabled="loading">
+              <i class="fas fa-rotate"></i>
+              <span>{{ loading ? 'Chargement…' : 'Rafraîchir' }}</span>
+            </button>
+          </div>
+
+          <!-- Tableau -->
+          <div class="table-wrapper">
+            <table v-if="routers.length" class="routers-table" aria-label="Etat des routeurs">
+              <thead>
+                <tr>
+                  <th>MAC Address</th>
+                  <th>Statut</th>
+                  <th>Dernier contact</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in routers" :key="r.mac">
+                  <td class="mono">{{ r.mac }}</td>
+                  <td><span :class="['state', stateClass(r.status)]">{{ label(r.status) }}</span></td>
+                  <td>{{ formatDate(r.time) }}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div v-else class="empty">No routers found.</div>
+          </div>
+
+          <p v-if="error" class="toast error">{{ error }}</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import BackgroundParticles from './BackgroundParticles.vue';
+import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { API } from '@/utils/api.js'
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
+const loading = ref(false)
+const error = ref('')
 
-function formatDate(isoString) {
-  const date = new Date(isoString)
-  return date.toLocaleString()
+function normalize(entry) {
+  return {
+    mac: entry.mac || entry.mac_address || entry.MAC || '—',
+    status: (entry.status || entry.value || 'unknown').toString().toLowerCase(),
+    time: entry.time || entry.lastSeen || entry.timestamp || new Date().toISOString()
+  }
+}
+function label(s) {
+  return s === 'online' ? 'En ligne' : s === 'offline' ? 'Hors ligne' : 'Inconnu'
+}
+function stateClass(s) {
+  return s === 'online' ? 'green' : s === 'offline' ? 'red' : 'orange'
+}
+function formatDate(iso) {
+  try { return new Date(iso).toLocaleString() } catch { return '—' }
 }
 
-onMounted(async () => {
-  const token = localStorage.getItem("token")
-
-  if (!token) {
-    console.error("❌ No JWT token found in localStorage")
-    return
-  }
-
+async function loadRouters() {
+  loading.value = true
+  error.value = ''
   try {
-    const response = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/data/routers`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      }
-    })
+    const token = localStorage.getItem('token') || ''
+    const res = await fetch(`${API}/api/data/routers`, {
+      headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    }).catch(() => null)
 
-    const text = await response.text()
-    if (!response.ok) {
-      console.error("❌ Error response:", text)
-      throw new Error(text)
-    }
-
-    const data = JSON.parse(text)
-
-    if (!Array.isArray(data)) {
-      console.warn("⚠️ Invalid router data:", data)
-      routers.value = []
-      return
-    }
-
-    routers.value = data.map(entry => ({
-      mac: entry.mac,
-      status: entry.value,
-      time: entry.time
-    }))
-  } catch (err) {
-    console.error("❌ Error loading router status:", err.message)
-    routers.value = []
+    if (!res || !res.ok) throw new Error('Affichage de données fictives (API indisponible).')
+    const raw = await res.json()
+    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
+    routers.value = list.map(normalize)
+  } catch (e) {
+    // Données FR fictives pour démo
+    routers.value = [
+      { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
+      { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
+      { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
+    ]
+    error.value = e.message || 'Erreur inconnue.'
+  } finally {
+    loading.value = false
   }
-})
+}
+
+onMounted(loadRouters)
 </script>
 
 <style scoped>
-.router-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: Arial, sans-serif;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
+:root {
+  --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+  --text-primary:#f5f7fa; --text-secondary:#9ca3af;
+  --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+  --danger:#ef4444; --success:#22c55e;
 }
 
-.router-table th,
-.router-table td {
-  padding: 12px 16px;
-  border: 1px solid #ccc;
-  text-align: left;
+/* Layout carte */
+.routers-page { position:relative; min-height:100vh; overflow:hidden; }
+.wrapper { position:relative; z-index:10; display:flex; justify-content:center; padding:32px; }
+.container { width:100%; max-width:1000px; }
+.card {
+  background: var(--panel-grey);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.05);
+  box-shadow: 0 0 40px rgba(0,194,194,.05);
 }
 
-.router-table th {
-  background-color: #f4f4f4;
-}
+/* Header */
+.header-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.header-row h2 { margin:0; font-size:20px; color:var(--text-primary); }
 
-.router-table tr:hover {
-  background-color: #f9f9f9;
+/* Boutons */
+.btn {
+  display:inline-flex; align-items:center; gap:8px;
+  border-radius:10px; padding:10px 14px; font-weight:600;
+  border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06);
+  color:var(--text-primary); cursor:pointer; transition:.15s;
 }
+.btn:hover { background:rgba(255,255,255,.10); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn.ghost { background:rgba(255,255,255,.06); }
 
-.online {
-  color: green;
-  font-weight: bold;
+/* Table */
+.table-wrapper { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(255,255,255,.06); }
+.routers-table { width:100%; border-collapse:separate; border-spacing:0; font-size:14px; }
+.routers-table thead th {
+  text-align:left; padding:12px 14px; background:rgba(255,255,255,.04);
+  border-bottom:1px solid rgba(255,255,255,.08); color:var(--text-secondary);
 }
+.routers-table tbody td { padding:14px; border-bottom:1px solid rgba(255,255,255,.05); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.2px; }
+.empty { text-align:center; color:var(--text-secondary); padding:18px; }
 
-.offline {
-  color: red;
-  font-weight: bold;
-}
+/* Badges d’état */
+.state { display:inline-block; padding:6px 10px; border-radius:999px; font-weight:600; font-size:12px; }
+.state.green  { background:rgba(22,163,74,.15); color:#22c55e; }
+.state.red    { background:rgba(239,68,68,.15); color:#f87171; }
+.state.orange { background:rgba(245,158,11,.15); color:#fbbf24; }
+
+/* Toast */
+.toast { margin-top:12px; text-align:center; padding:10px 12px; border-radius:8px; font-size:14px; }
+.toast.error { background:rgba(239,68,68,.12); color:var(--danger); }
 </style>
