@@ -1,132 +1,500 @@
+<!-- src/frontend/src/components/AddUserForm.vue -->
 <template>
-  <div class="add-user-page">
-    <h2>Add New User</h2>
+  <div class="adduser-page">
+    <!-- Particules -->
+    <div id="particles-js"></div>
 
-    <form @submit.prevent="submitForm">
-      <div>
-        <label>First Name:</label>
-        <input v-model="firstName" type="text" required />
+    <!-- Carte centrée -->
+    <div class="adduser-wrapper">
+      <div class="adduser-container">
+        <div class="adduser-card">
+          <h2 class="adduser-title">NetSecure-IQ</h2>
+          <h3 class="adduser-subtitle">Create User</h3>
+
+          <form @submit.prevent="submitForm" class="adduser-form" novalidate>
+            <!-- Identité -->
+            <div class="form-section">
+              <h4><i class="fas fa-id-card"></i> Identity</h4>
+              <div class="form-row">
+                <div class="field">
+                  <label for="firstName">First name</label>
+                  <input
+                    id="firstName"
+                    v-model.trim="firstName"
+                    type="text"
+                    :class="{ invalid: showErrors && !firstNameValid }"
+                    placeholder="Jane"
+                    required
+                  />
+                  <small v-if="showErrors && !firstNameValid">First name is required (min 2 chars).</small>
+                </div>
+
+                <div class="field">
+                  <label for="lastName">Last name</label>
+                  <input
+                    id="lastName"
+                    v-model.trim="lastName"
+                    type="text"
+                    :class="{ invalid: showErrors && !lastNameValid }"
+                    placeholder="Doe"
+                    required
+                  />
+                  <small v-if="showErrors && !lastNameValid">Last name is required (min 2 chars).</small>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="email">Email</label>
+                <input
+                  id="email"
+                  v-model.trim="email"
+                  type="email"
+                  :class="{ invalid: showErrors && !emailValid }"
+                  placeholder="user@example.com"
+                  required
+                />
+                <small v-if="showErrors && !emailValid">Please enter a valid email address.</small>
+              </div>
+
+              <div class="field">
+                <label for="phone">Phone (optional)</label>
+                <input
+                  id="phone"
+                  v-model.trim="phone"
+                  type="tel"
+                  placeholder="+33 6 12 34 56 78"
+                />
+              </div>
+            </div>
+
+            <!-- Contexte / Organisation -->
+            <div class="form-section">
+              <h4><i class="fas fa-building"></i> Organization</h4>
+
+              <div v-if="isAdmin" class="field">
+                <label for="org">Select organization</label>
+                <select
+                  id="org"
+                  v-model="selectedOrg"
+                  :class="{ invalid: showErrors && !orgValid }"
+                  required
+                >
+                  <option disabled value="">Select organization…</option>
+                  <option v-for="org in organizations" :key="org.id" :value="org.id">
+                    {{ org.name }}
+                  </option>
+                </select>
+                <small v-if="showErrors && !orgValid">Organization is required.</small>
+              </div>
+
+              <div v-else class="readonly-pill" title="Taken from your session">
+                <span class="dot"></span>
+                Using your organization: <code>{{ userOrgId || '—' }}</code>
+              </div>
+
+              <div class="readonly-pill" title="Role is fixed for this screen">
+                <span class="dot cyan"></span>
+                Role: <code>User</code>
+              </div>
+            </div>
+
+            <!-- Sécurité / Options -->
+            <div class="form-section">
+              <h4><i class="fas fa-shield-alt"></i> Security & Options</h4>
+
+              <div class="options">
+                <label class="checkbox">
+                  <input type="checkbox" v-model="sendInvite" />
+                  <span>Send invitation email</span>
+                </label>
+
+                <label class="checkbox">
+                  <input type="checkbox" v-model="requireReset" />
+                  <span>Require password reset on first login</span>
+                </label>
+
+                <label class="checkbox">
+                  <input type="checkbox" v-model="active" />
+                  <span>Active account</span>
+                </label>
+              </div>
+
+              <div class="field">
+                <label for="tempPass">
+                  Temporary password (optional)
+                </label>
+                <div class="pass-row">
+                  <input
+                    id="tempPass"
+                    :type="showPassword ? 'text' : 'password'"
+                    v-model="tempPassword"
+                    placeholder="Leave empty to auto-generate server side"
+                  />
+                  <button type="button" class="btn-ghost" @click="toggleShowPassword">
+                    <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                  </button>
+                  <button type="button" class="btn-ghost" @click="generatePassword">
+                    <i class="fas fa-magic"></i> Generate
+                  </button>
+                </div>
+
+                <!-- jauge -->
+                <div class="strength" v-if="tempPassword">
+                  <div class="bar" :style="{ width: strengthPct + '%'}"></div>
+                </div>
+                <small v-if="tempPassword">Strength: {{ strengthLabel }}</small>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <button class="submit" type="submit" :disabled="!formValid || loading">
+              <span v-if="loading" class="spinner"></span>
+              {{ loading ? 'Creating…' : 'Create user' }}
+            </button>
+
+            <p v-if="message" class="adduser-message" :class="successMessage ? 'success' : 'error'">
+              {{ message }}
+            </p>
+          </form>
+        </div>
       </div>
-
-      <div>
-        <label>Last Name:</label>
-        <input v-model="lastName" type="text" required />
-      </div>
-
-      <div>
-        <label>Email:</label>
-        <input v-model="email" type="email" required />
-      </div>
-
-      <div v-if="isAdmin">
-        <label>Select Organization:</label>
-        <select v-model="selectedOrg" required>
-          <option v-for="org in organizations" :key="org.id" :value="org.id">
-            {{ org.name }}
-          </option>
-        </select>
-      </div>
-
-      <button type="submit">Add User</button>
-      <p v-if="message">{{ message }}</p>
-    </form>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 
-const email = ref('')
+/* Champs */
 const firstName = ref('')
 const lastName = ref('')
-const organizations = ref([])
-const selectedOrg = ref(null)
+const email = ref('')
+const phone = ref('')
+
+/* Options */
+const sendInvite = ref(true)
+const requireReset = ref(true)
+const active = ref(true)
+const tempPassword = ref('')
+const showPassword = ref(false)
+
+/* UI */
+const loading = ref(false)
 const message = ref('')
+const successMessage = ref(false)
+const showErrors = ref(false)
 
-const role = localStorage.getItem('role')
-const userOrgId = localStorage.getItem('organization_id')
-const isAdmin = role === 'administrator'
+/* Contexte auth */
+const token = localStorage.getItem('token') || ''
+const role = (localStorage.getItem('role') || '').toLowerCase()
+const isAdmin = computed(() => role === 'administrator')
+const userOrgId = (localStorage.getItem('organization_id') || '').toString()
 
-onMounted(async () => {
-  if (isAdmin) {
-    const res = await fetch(
-      `${process.env.VUE_APP_BACKEND_URL}/api/organizations`,
-      {
-        headers: {
-          Authorization: 'Bearer ' + localStorage.getItem('token'),
-        },
-      }
-    )
-    const data = await res.json().catch(() => ({ organizations: [] }))
-    organizations.value = data.organizations || []
+/* Orgs */
+const organizations = ref([])
+const selectedOrg = ref('')
+
+/* ---- Validation ---- */
+const emailRe =
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i
+
+const firstNameValid = computed(() => firstName.value.trim().length >= 2)
+const lastNameValid  = computed(() => lastName.value.trim().length >= 2)
+const emailValid     = computed(() => emailRe.test(email.value))
+const orgValid       = computed(() => (isAdmin.value ? !!selectedOrg.value : !!userOrgId))
+const formValid      = computed(() =>
+  firstNameValid.value &&
+  lastNameValid.value &&
+  emailValid.value &&
+  orgValid.value
+)
+
+/* ---- Password strength ---- */
+function scorePassword(pw) {
+  let score = 0
+  if (!pw) return 0
+  if (pw.length >= 8) score++
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++
+  if (/\d/.test(pw)) score++
+  if (/[^A-Za-z0-9]/.test(pw)) score++
+  if (pw.length >= 12) score++
+  return Math.min(score, 4)
+}
+const strengthScore = computed(() => scorePassword(tempPassword.value))
+const strengthPct   = computed(() => [0, 25, 50, 75, 100][strengthScore.value])
+const strengthLabel = computed(() => ['Very weak', 'Weak', 'Medium', 'Strong', 'Very strong'][strengthScore.value])
+
+function generatePassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*?'
+  let out = ''
+  for (let i = 0; i < 14; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)]
   }
-})
+  tempPassword.value = out
+}
+function toggleShowPassword() {
+  showPassword.value = !showPassword.value
+}
 
-const submitForm = async () => {
+/* ---- Particles ---- */
+function renderParticles() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const old = document.querySelector('#particles-js > canvas')
+  if (old) old.remove()
+  window.particlesJS('particles-js', {
+    particles: {
+      number: { value: 80, density: { enable: true, value_area: 800 } },
+      color: { value: dark ? '#ffffff' : '#555555' },
+      shape: { type: 'circle' },
+      opacity: { value: 0.5 },
+      size: { value: 3, random: true },
+      line_linked: {
+        enable: true,
+        distance: 150,
+        color: dark ? '#ffffff' : '#888888',
+        opacity: 0.4,
+        width: 1
+      },
+      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: {
+        onhover: { enable: true, mode: 'repulse' },
+        onclick: { enable: true, mode: 'push' },
+        resize: true
+      },
+      modes: {
+        repulse: { distance: 200 },
+        push: { particles_nb: 4 }
+      }
+    },
+    retina_detect: true
+  })
+}
+async function initializeParticles() {
+  if (!document.getElementById('particles-js')) {
+    await new Promise(r => setTimeout(r, 50))
+    return initializeParticles()
+  }
+  if (!window.particlesJS) {
+    await new Promise(resolve => {
+      const s = document.createElement('script')
+      s.src = '/particles/particles.min.js'
+      s.onload = resolve
+      document.body.appendChild(s)
+    })
+  }
+  await nextTick()
+  renderParticles()
+  const obs = new MutationObserver(m => {
+    if (m[0]?.attributeName === 'data-theme') renderParticles()
+  })
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+}
+
+/* ---- Data ---- */
+async function loadOrganizations() {
+  if (!isAdmin.value) return
+  try {
+    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/organizations`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const data = await res.json().catch(() => ({}))
+    organizations.value = Array.isArray(data.organizations) ? data.organizations : []
+  } catch {
+    organizations.value = []
+  }
+}
+
+/* ---- Submit ---- */
+async function submitForm() {
+  showErrors.value = true
+  if (!formValid.value) return
+
+  const orgId = isAdmin.value ? String(selectedOrg.value) : String(userOrgId)
+
   const payload = {
     email: email.value,
     first_name: firstName.value,
     last_name: lastName.value,
-    organization_id: isAdmin ? selectedOrg.value : userOrgId,
+    phone: phone.value || undefined,
+    role: 'user',
+    organization_id: orgId,
+    send_invite: sendInvite.value,
+    require_password_reset: requireReset.value,
+    active: active.value,
+    temp_password: tempPassword.value || undefined
   }
 
-  const res = await fetch(
-    `${process.env.VUE_APP_BACKEND_URL}/api/users`,
-    {
+  loading.value = true
+  message.value = ''
+  successMessage.value = false
+
+  try {
+    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + localStorage.getItem('token'),
+        Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify(payload),
-    }
-  )
-  const data = await res.json().catch(() => ({ error: 'Invalid response' }))
-  message.value = res.ok
-    ? '✅ User created and password sent via email!'
-    : '❌ Failed: ' + (data.error || data.message)
+      body: JSON.stringify(payload)
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed')
+
+    successMessage.value = true
+    message.value = '✅ User created successfully.'
+    // Reset “soft”
+    email.value = ''
+    firstName.value = ''
+    lastName.value = ''
+    phone.value = ''
+    tempPassword.value = ''
+    if (isAdmin.value) selectedOrg.value = ''
+    showErrors.value = false
+  } catch (err) {
+    successMessage.value = false
+    message.value = '❌ Failed: ' + (err.message || 'Unknown error')
+  } finally {
+    loading.value = false
+  }
 }
+
+/* ---- Mount ---- */
+onMounted(() => {
+  initializeParticles()
+  loadOrganizations()
+})
 </script>
 
 <style scoped>
-.add-user-page {
-  max-width: 480px;
-  margin: 2rem auto;
-  padding: 2rem;
-  background: var(--panel-grey);
-  border-radius: 8px;
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --radius: 12px;
 }
-.add-user-page h2 {
-  margin-bottom: 1rem;
-  color: var(--primary-accent);
+
+/* Page */
+.adduser-page { position: relative; min-height: 100vh; overflow: hidden; }
+
+/* Particles */
+#particles-js {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  z-index: 0; background-color: var(--bg-dark);
+  transition: background-color .3s ease; pointer-events: none;
 }
-.add-user-page form div {
-  margin-bottom: 0.75rem;
+[data-theme='light'] #particles-js { background-color: #E0E0E0; }
+
+/* Wrapper & card (même style que Login) */
+.adduser-wrapper {
+  position: relative; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px; min-height: 100vh;
 }
-.add-user-page label {
-  display: block;
-  margin-bottom: 0.25rem;
-  color: var(--text-secondary);
+.adduser-container { width: 100%; max-width: 720px; } /* un peu plus large qu'un login */
+.adduser-card {
+  background-color: var(--panel-grey);
+  border-radius: 16px; padding: 28px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
+  border: 1px solid rgba(255,255,255,.05);
+  box-sizing: border-box;
 }
-.add-user-page input,
-.add-user-page select {
-  width: 100%;
-  padding: 0.5rem;
+
+/* En-têtes */
+.adduser-title {
+  text-align: center; font-size: 20px; font-weight: 600;
+  color: var(--primary-accent); margin-bottom: 6px;
+}
+.adduser-subtitle { text-align: center; font-size: 16px; margin-bottom: 20px; }
+
+/* Forme générale */
+.adduser-form { display: flex; flex-direction: column; gap: 16px; }
+.form-section {
+  background-color: rgba(31,41,55,.35);
+  border-radius: 10px; padding: 16px;
+  border: 1px solid rgba(255,255,255,.05);
+}
+.form-section h4 {
+  margin: 0 0 12px; color: var(--primary-accent);
+  font-size: 15px; font-weight: 600; display: flex; gap: 8px; align-items: center;
+}
+
+/* Champs */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+label { font-size: 13px; color: var(--text-secondary); }
+input, select {
+  width: 100%; background-color: var(--panel-grey);
   border: 1px solid var(--divider-grey);
-  border-radius: 4px;
-  background: var(--bg-dark);
-  color: var(--text-primary);
+  border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary);
+  transition: border-color .2s;
 }
-.add-user-page button {
-  margin-top: 1rem;
-  background: var(--primary-accent);
-  color: #fff;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+input::placeholder { color: var(--text-secondary); }
+input:focus, select:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+.invalid { border-color: var(--danger)!important; }
+small { color: var(--danger); }
+
+/* Badges read-only */
+.readonly-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 999px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
+  font-size: 13px; color: var(--text-primary);
 }
-.add-user-page p {
-  margin-top: 0.5rem;
+.readonly-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #aaa; }
+.readonly-pill .dot.cyan { background: var(--primary-accent); }
+.readonly-pill code { opacity: .9; }
+
+/* Options */
+.options { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; }
+.checkbox { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 14px; }
+.checkbox input { width: 16px; height: 16px; }
+
+/* Password widgets */
+.pass-row { display: flex; gap: 8px; }
+.btn-ghost {
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  color: var(--text-primary); padding: 10px 12px; border-radius: 6px;
+  cursor: pointer; font-weight: 600;
 }
+.btn-ghost:hover { background: rgba(255,255,255,.10); }
+.strength { margin-top: 8px; height: 6px; background: rgba(255,255,255,.08); border-radius: 6px; overflow: hidden; }
+.strength .bar { height: 100%; background: linear-gradient(90deg,#ff4d4d,#ffc107,#22c55e); }
+
+/* Submit */
+.submit {
+  background-color: var(--primary-accent); color: var(--bg-dark);
+  border: none; border-radius: 8px; font-weight: 700; padding: 12px 20px;
+  cursor: pointer; transition: background-color .2s; width: 100%;
+}
+.submit:hover { background-color: var(--primary-hover); color: #fff; }
+.submit:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+/* Spinner minimal */
+.spinner {
+  display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,.2);
+  border-top-color: rgba(0,0,0,.6); border-radius: 50%; margin-right: 8px;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Messages */
+.adduser-message {
+  margin-top: 10px; padding: 10px 12px; border-radius: 6px; text-align: center; font-size: 14px;
+}
+.adduser-message.success { background-color: rgba(34,197,94,.1); color: var(--success); }
+.adduser-message.error   { background-color: rgba(239,68,68,.1); color: var(--danger); }
+
+/* Responsive */
+@media (max-width: 760px) { .form-row { grid-template-columns: 1fr; } }
 </style>
