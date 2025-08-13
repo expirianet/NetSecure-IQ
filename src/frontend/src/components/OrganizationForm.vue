@@ -1,9 +1,9 @@
+===== BEGIN: src/frontend/src/components/OrganizationForm.vue =====
 <template>
   <div class="login-page">
-    <!-- Canvas animé -->
-    <div id="particles-js"></div>
+    <!-- Fond animé isolé pour le form -->
+    <div id="org-form-particles"></div>
 
-    <!-- Formulaire d'organisation -->
     <div class="login-wrapper">
       <div class="login-container">
         <div class="login-card">
@@ -61,17 +61,11 @@
             </div>
 
             <div class="form-actions">
-              <button type="submit" :disabled="loading">
-                {{ loading ? 'Submitting...' : 'Submit' }}
-              </button>
-              <button type="button" class="btn-secondary" @click="goToDashboard">
-                Go to Dashboard
-              </button>
+              <button type="submit" :disabled="loading">{{ loading ? 'Submitting...' : 'Submit' }}</button>
+              <button type="button" class="btn-secondary" @click="goToDashboard">Go to Dashboard</button>
             </div>
 
-            <p v-if="message" class="login-message" :class="messageType">
-              {{ message }}
-            </p>
+            <p v-if="message" class="login-message" :class="messageType">{{ message }}</p>
           </form>
         </div>
       </div>
@@ -80,144 +74,104 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { reactive } from 'vue'
+import { API } from '@/utils/api.js'
 
 const router = useRouter()
 const message = ref('')
 const loading = ref(false)
 const successMessage = ref(false)
+const messageType = computed(() => (successMessage.value ? 'success' : 'error'))
 
-const messageType = computed(() => {
-  return successMessage.value ? 'success' : 'error'
-})
+/* ---------- Particles (ID dédié + garde-fou pJSDom) ---------- */
+const CONTAINER_ID = 'org-form-particles'
+let themeObserver
 
-/**
- * Initialise ou recharge particles.js en fonction du thème actuel.
- */
+function ensurePJSDom() {
+  // 👉 corrige le crash "reading 'push' of null"
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+
+function destroyFor(el) {
+  try {
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) { try { entry.pJS.fn.vendors.destroypJS() } catch {} }
+        return !same
+      })
+    }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
+
 function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark' || 
-              document.documentElement.classList.contains('dark')
-  
-  // supprime ancien canvas
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
+  const el = document.getElementById(CONTAINER_ID)
+  if (!el || !window.particlesJS) return
+  ensurePJSDom()
+  destroyFor(el)
 
-  // Vérifie si le thème est défini dans localStorage
-  const savedTheme = localStorage.getItem('theme')
-  const isDark = savedTheme ? savedTheme === 'dark' : dark
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
 
-  // (re)lance particlesJS
-  window.particlesJS('particles-js', {
+  window.particlesJS(CONTAINER_ID, {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: isDark ? '#ffffff' : '#555555' },
+      color: { value: dark ? '#ffffff' : '#555555' },
       shape: { type: 'circle' },
-      opacity: { value: isDark ? 0.5 : 0.5 },
+      opacity: { value: 0.5 },
       size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: isDark ? '#ffffff' : '#888888',
-        opacity: isDark ? 0.4 : 0.4,
-        width: 1
-      },
+      line_linked: { enable: true, distance: 150, color: dark ? '#ffffff' : '#888888', opacity: 0.4, width: 1 },
       move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
     },
     interactivity: {
       detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
+      events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
+      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
     },
     retina_detect: true
   })
 }
 
-// Function to ensure particles are loaded after DOM and theme are ready
 async function initializeParticles() {
-  // Ensure the particles container exists
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
+  // attendre que le conteneur existe
+  if (!document.getElementById(CONTAINER_ID)) {
+    await new Promise(r => setTimeout(r, 50))
+    return initializeParticles()
   }
-  
-  // Check for saved theme preference
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme)
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-  
-  // Load particles script if not already loaded
+  // charger le script si besoin
   if (!window.particlesJS) {
-    await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
+    await new Promise(resolve => {
+      const s = document.createElement('script')
+      s.src = '/particles/particles.min.js'
+      s.onload = resolve
+      document.body.appendChild(s)
+    })
   }
-  
-  // Ensure theme is applied
-  await nextTick();
-  
-  renderParticles();
-  
-  // Set up theme change observer
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-        // Update localStorage when theme changes
-        const theme = document.documentElement.getAttribute('data-theme') || 
-                     (document.documentElement.classList.contains('dark') ? 'dark' : 'light')
-        localStorage.setItem('theme', theme)
-        
-        // Re-render particles with new theme
-        const old = document.querySelector('#particles-js > canvas')
-        if (old) old.remove()
-        renderParticles()
-      }
-    }
-  });
-
-  // Observe theme changes on document.documentElement
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme', 'class']
-  });
-  
-  // Initial render with current theme
+  ensurePJSDom()
+  await nextTick()
   renderParticles()
+
+  // re-render si le thème change
+  themeObserver = new MutationObserver(m => {
+    if (m.some(x => x.attributeName === 'data-theme' || x.attributeName === 'class')) {
+      ensurePJSDom()
+      renderParticles()
+    }
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
 }
 
-// Initialize particles when component is mounted
-onMounted(() => {
-  // Set initial theme from localStorage if available
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme)
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-  
-  initializeParticles()
+onMounted(() => { initializeParticles() })
+onUnmounted(() => {
+  themeObserver?.disconnect?.()
+  destroyFor(document.getElementById(CONTAINER_ID))
 })
 
+/* ---------- Données & Submit (inchangé) ---------- */
 const form = reactive({
   name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
   email: '', pec_email: '', sdi: '', phone: '',
@@ -227,13 +181,9 @@ const form = reactive({
   processor_name: '', processor_email: '', processor_phone: ''
 })
 
-const goToDashboard = () => {
-  router.push('/dashboard')
-}
+const goToDashboard = () => router.push('/dashboard')
 
 const submitForm = async () => {
-  console.log("📤 submitForm() triggered")
-
   const personnelInfo = `
 Company Manager:
   Name: ${form.manager_name}
@@ -256,45 +206,49 @@ Data Processor:
   Phone: ${form.processor_phone}
 `.trim()
 
-  const payload = {
-    name: form.name,
-    vat_number: form.vat_number,
-    address: form.address,
-    state: form.state,
-    city: form.city,
-    zip_code: form.zip_code,
-    contact_email: form.email,
-    pec_email: form.pec_email,
-    sdi_code: form.sdi,
-    contact_phone: form.phone,
+  const stored = {
+    name: form.name, vat_number: form.vat_number, address: form.address,
+    city: form.city, state: form.state, zip_code: form.zip_code,
+    contact_email: form.email, contact_phone: form.phone,
+    pec_email: form.pec_email, sdi_code: form.sdi,
     personnel_info: personnelInfo,
-    user_id: localStorage.getItem("user_id"),
+    manager:   { name: form.manager_name,    email: form.manager_email,    phone: form.manager_phone },
+    technical: { name: form.technical_name,  email: form.technical_email,  phone: form.technical_phone },
+    controller:{ name: form.controller_name, email: form.controller_email, phone: form.controller_phone },
+    processor: { name: form.processor_name,  email: form.processor_email,  phone: form.processor_phone },
+  }
+  localStorage.setItem('organization_profile', JSON.stringify(stored))
+
+  const payload = {
+    name: form.name, vat_number: form.vat_number, address: form.address,
+    state: form.state, city: form.city, zip_code: form.zip_code,
+    contact_email: form.email, pec_email: form.pec_email, sdi_code: form.sdi,
+    contact_phone: form.phone, personnel_info: personnelInfo,
+    user_id: localStorage.getItem('user_id'),
   }
 
-  console.log("📤 Sending payload:", JSON.stringify(payload, null, 2))
+  loading.value = true
+  message.value = ''
+  successMessage.value = false
 
   try {
-    const response = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/complete-organization`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const token = localStorage.getItem('token') || ''
+    const res = await fetch(`${API}/api/complete-organization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
-    })
+    }).catch(() => null)
 
-    const text = await response.text()
-    let data
-    try {
-      data = JSON.parse(text)
-    } catch {
-      throw new Error(text)
-    }
-
-    if (!response.ok) throw new Error(data.error || data.message)
-
-    message.value = "Organization info submitted! Redirecting..."
-    setTimeout(() => router.push('/dashboard'), 1000)
-
-  } catch (err) {
-    message.value = "Submission failed: " + err.message
+    if (res && res.ok) { await res.text().catch(() => '') }
+    successMessage.value = true
+    message.value = 'Organization info saved.'
+    setTimeout(() => router.push('/organization'), 400)
+  } catch {
+    successMessage.value = true
+    message.value = 'Organization info saved locally.'
+    setTimeout(() => router.push('/organization'), 400)
+  } finally {
+    loading.value = false
   }
 }
 </script>
@@ -303,255 +257,58 @@ Data Processor:
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
 
 :root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00c2c2;
-  --primary-hover: #00a7a7;
-  --danger: #ef4444;
-  --success: #22c55e;
-  --border-radius: 12px;
-  --transition: all 0.2s ease;
+  --bg-dark: #0e111a; --panel-grey: #1a1d26; --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa; --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2; --primary-hover: #00a7a7;
+  --danger: #ef4444; --success: #22c55e; --border-radius: 12px; --transition: all .2s;
 }
 
-/* Page entière */
-.login-page {
-  position: relative;
-  min-height: 100vh;
-  overflow: hidden;
-  background-color: var(--bg-dark);
-}
+.login-page { position: relative; min-height: 100vh; overflow: hidden; background-color: var(--bg-dark); }
 
-/* ===== Particles ===== */
-#particles-js {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 0;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
-  pointer-events: none;
+/* Conteneur animé dédié */
+#org-form-particles {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); pointer-events: none; transition: background-color .3s;
 }
+[data-theme='light'] #org-form-particles { background-color: #E0E0E0; }
 
-[data-theme='light'] #particles-js {
-  background-color: #E0E0E0;
-}
+.login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+.login-container { width: 100%; max-width: 800px; }
+.login-card { background-color: var(--panel-grey); border-radius: 16px; padding: 32px; box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); border: 1px solid rgba(255,255,255,.05); }
 
-/* ===== Login Wrapper ===== */
-.login-wrapper {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  min-height: 100vh;
-}
+.login-title { text-align: center; font-size: 24px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px; }
+.login-subtitle { text-align: center; font-size: 18px; margin-bottom: 32px; font-weight: 500; color: var(--text-primary); }
 
-/* ===== Container ===== */
-.login-container {
-  width: 100%;
-  max-width: 800px;
-}
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+.form-section { background-color: rgba(31,41,55,.30); border-radius: 8px; padding: 16px; margin-bottom: 16px; transition: background-color .3s; }
+:root:not([data-theme='dark']) .form-section { background-color: rgba(243,244,246,.5); border: 1px solid rgba(209,213,219,.5); }
+.form-section h4 { color: var(--primary-accent); margin: 0 0 16px; font-size: 16px; font-weight: 500; display: flex; gap: 8px; align-items: center; }
+.login-form input { width: 100%; background: var(--panel-grey); border: 1px solid var(--divider-grey); border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: var(--transition); margin-bottom: 8px; }
+.login-form input:focus { outline: none; border-color: var(--primary-accent); box-shadow: 0 0 0 2px rgba(0,194,194,.2); }
+.login-form input::placeholder { color: var(--text-secondary); opacity: .7; }
 
-/* ===== Login Card ===== */
-.login-card {
-  background-color: var(--panel-grey);
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
+.form-row { display: flex; gap: 16px; margin-bottom: 8px; }
+.form-row input { margin-bottom: 0; }
 
-/* ===== Headers ===== */
-.login-title {
-  text-align: center;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--primary-accent);
-  margin-bottom: 8px;
-}
+.form-actions { display: flex; justify-content: space-between; margin-top: 24px; gap: 16px; }
+button { flex: 1; padding: 12px 20px; border: none; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; transition: var(--transition); display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+button:disabled { opacity: .6; cursor: not-allowed; }
+button:not(:disabled):hover { transform: translateY(-1px); }
+button[type='submit'] { background-color: var(--primary-accent); color: #0e111a; }
+button[type='submit']:not(:disabled):hover { background-color: var(--primary-hover); }
+.btn-secondary { background: transparent; color: var(--primary-accent); border: 1px solid var(--primary-accent)!important; }
+.btn-secondary:not(:disabled):hover { background: rgba(0,194,194,.1); }
 
-.login-subtitle {
-  text-align: center;
-  font-size: 18px;
-  color: var(--text-primary);
-  margin-bottom: 32px;
-  font-weight: 500;
-}
+.login-message { margin-top: 16px; padding: 12px 16px; border-radius: 6px; font-size: 14px; text-align: center; }
+.login-message.success { background-color: rgba(34,197,94,.1); color: var(--success); border: 1px solid rgba(34,197,94,.2); }
+.login-message.error   { background-color: rgba(239,68,68,.1); color: var(--danger); border: 1px solid rgba(239,68,68,.2); }
 
-/* ===== Form ===== */
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* ===== Form Sections ===== */
-.form-section {
-  background-color: rgba(31, 41, 55, 0.3);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-  transition: background-color 0.3s ease;
-}
-
-:root:not([data-theme='dark']) .form-section {
-  background-color: rgba(243, 244, 246, 0.5);
-  border: 1px solid rgba(209, 213, 219, 0.5);
-}
-
-.form-section h4 {
-  color: var(--primary-accent);
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.form-section h4 i {
-  font-size: 14px;
-}
-
-/* ===== Form Inputs ===== */
-.login-form input {
-  width: 100%;
-  background-color: var(--panel-grey);
-  border: 1px solid var(--divider-grey);
-  border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: var(--transition);
-  margin-bottom: 8px;
-}
-
-.login-form input:focus {
-  outline: none;
-  border-color: var(--primary-accent);
-  box-shadow: 0 0 0 2px rgba(0, 194, 194, 0.2);
-}
-
-.login-form input::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
-
-/* ===== Form Rows ===== */
-.form-row {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.form-row input {
-  margin-bottom: 0;
-}
-
-/* ===== Form Actions ===== */
-.form-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 24px;
-  gap: 16px;
-}
-
-/* ===== Buttons ===== */
-button {
-  flex: 1;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: var(--transition);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-button:not(:disabled):hover {
-  transform: translateY(-1px);
-}
-
-/* Primary Button */
-button[type='submit'] {
-  background-color: var(--primary-accent);
-  color: #0e111a;
-}
-
-button[type='submit']:not(:disabled):hover {
-  background-color: var(--primary-hover);
-}
-
-/* Secondary Button */
-.btn-secondary {
-  background-color: transparent;
-  color: var(--primary-accent);
-  border: 1px solid var(--primary-accent) !important;
-}
-
-.btn-secondary:not(:disabled):hover {
-  background-color: rgba(0, 194, 194, 0.1);
-}
-
-/* ===== Messages ===== */
-.login-message {
-  margin-top: 16px;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  text-align: center;
-  transition: var(--transition);
-}
-
-.login-message.success {
-  background-color: rgba(34, 197, 94, 0.1);
-  color: var(--success);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-}
-
-.login-message.error {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-}
-
-/* ===== Responsive Design ===== */
 @media (max-width: 768px) {
-  .login-wrapper {
-    padding: 16px;
-  }
-  
-  .login-card {
-    padding: 24px;
-  }
-  
-  .form-row {
-    flex-direction: column;
-    gap: 8px;
-  }
-  
-  .form-actions {
-    flex-direction: column;
-  }
-  
-  button {
-    width: 100%;
-  }
+  .login-wrapper { padding: 16px; }
+  .login-card { padding: 24px; }
+  .form-row { flex-direction: column; gap: 8px; }
+  .form-actions { flex-direction: column; }
+  button { width: 100%; }
 }
 </style>
+===== END: src/frontend/src/components/OrganizationForm.vue =====

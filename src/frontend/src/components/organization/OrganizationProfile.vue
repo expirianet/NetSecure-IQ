@@ -1,79 +1,81 @@
+===== BEGIN: src/frontend/src/components/organization/OrganizationProfile.vue =====
 <template>
-  <div class="login-page">
-    <!-- Indicateur de chargement -->
-    <div v-if="isLoading" class="loading-overlay">
-      <div class="loading-spinner"></div>
-    </div>
-    
-    <!-- animated particles background -->
-    <div id="particles-js"></div>
-    
-    <!-- Messages d'erreur et de succès -->
-    <div v-if="showError" class="notification error">
-      {{ errorMessage }}
-      <button @click="showError = false" class="close-btn">&times;</button>
-    </div>
-    
-    <div v-if="showSuccess" class="notification success">
-      Données chargées avec succès !
-      <button @click="showSuccess = false" class="close-btn">&times;</button>
-    </div>
+  <div class="org-page">
+    <!-- Fond animé isolé pour la page profil -->
+    <div id="org-particles" class="particles-layer"></div>
 
-    <div class="login-wrapper">
-      <div class="login-container">
-        <div class="login-card">
-          <!-- Page header -->
-          <h2 class="login-title">Organization Profile</h2>
-          <h3 class="login-subtitle">View and manage your organization's information</h3>
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <h2 class="title">NetSecure-IQ</h2>
+          <h3 class="subtitle">Organization Profile</h3>
 
-          <!-- Profile content -->
-          <div class="login-form">
-            <!-- Organization Info -->
-            <div class="form-section">
-              <h4><i class="fas fa-building"></i> Organization Information</h4>
-              <input readonly :value="org.name" />
-              <input readonly :value="org.vatNumber" />
-              <input readonly :value="org.address" />
-              <div class="form-row">
-                <input readonly :value="org.city" />
-                <input readonly :value="org.state" />
-                <input readonly :value="org.zipCode" />
+          <div v-if="!org" class="empty">
+            <p>No organization information saved yet.</p>
+            <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
+          </div>
+
+          <div v-else class="content">
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-building"></i> Organization Information</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ safe(org.name) }}</span></div>
+                <div class="row"><label>VAT / Fiscal Code</label><span>{{ safe(org.vat_number) }}</span></div>
+                <div class="row wide"><label>Address</label><span>{{ safe(org.address) }}</span></div>
+                <div class="row"><label>City</label><span>{{ safe(org.city) }}</span></div>
+                <div class="row"><label>State</label><span>{{ safe(org.state) }}</span></div>
+                <div class="row"><label>ZIP</label><span>{{ safe(org.zip_code) }}</span></div>
+                <div class="row"><label>Email</label><span>{{ safe(org.contact_email) }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ safe(org.contact_phone) }}</span></div>
+                <div class="row"><label>PEC Email</label><span>{{ safe(org.pec_email) }}</span></div>
+                <div class="row"><label>SDI Code</label><span>{{ safe(org.sdi_code) }}</span></div>
               </div>
-              <input readonly :value="org.email" />
-              <input readonly :value="org.phone" />
-              <input readonly :value="org.pecEmail || '—'" />
-              <input readonly :value="org.sdiCode || '—'" />
-            </div>
+            </section>
 
-            <!-- Company Manager -->
-            <div class="form-section">
-              <h4><i class="fas fa-user-tie"></i> Company Manager</h4>
-              <input readonly :value="org.manager.name" />
-              <input readonly :value="org.manager.email" />
-              <input readonly :value="org.manager.phone" />
-            </div>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-user-tie"></i> Company Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(manager).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(manager).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(manager).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Data Controller -->
-            <div class="form-section">
-              <h4><i class="fas fa-shield-alt"></i> Data Controller</h4>
-              <input readonly :value="org.controller.name" />
-              <input readonly :value="org.controller.email" />
-              <input readonly :value="org.controller.phone" />
-            </div>
+            <section v-if="hasTechnical" class="section">
+              <h4 class="section-title"><i class="fas fa-user-cog"></i> Technical Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(technical).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(technical).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(technical).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Data Processor -->
-            <div class="form-section">
-              <h4><i class="fas fa-database"></i> Data Processor</h4>
-              <input readonly :value="org.processor.name" />
-              <input readonly :value="org.processor.email" />
-              <input readonly :value="org.processor.phone" />
-            </div>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-shield-alt"></i> Data Controller</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(controller).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(controller).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(controller).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Edit button -->
-            <div class="form-actions">
-              <router-link to="/organization/edit" class="btn btn-primary">
-                <i class="fas fa-edit"></i> Edit Profile
-              </router-link>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-database"></i> Data Processor</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(processor).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(processor).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(processor).phone }}</span></div>
+              </div>
+            </section>
+
+            <section v-if="org.personnel_info" class="section">
+              <h4 class="section-title"><i class="fas fa-file-alt"></i> Personnel Info</h4>
+              <pre class="pre">{{ org.personnel_info }}</pre>
+            </section>
+
+            <div class="actions">
+              <RouterLink class="btn primary" to="/organization/edit">Edit</RouterLink>
+              <button class="btn ghost" @click="clearLocal">Reset local data</button>
             </div>
           </div>
         </div>
@@ -83,411 +85,138 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
+/**
+ * Important :
+ * - Pas de <BackgroundParticles/> ici.
+ * - On utilise un ID dédié + garde-fou pJSDom.
+ */
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 
-const router = useRouter();
-const isLoading = ref(true);
-const error = ref(null);
-const showSuccess = ref(false);
-const showError = ref(false);
-const errorMessage = ref('');
+const CONTAINER_ID = 'org-particles'
+let themeObserver
 
-// Données de l'organisation
-const org = ref({
-  name: '',
-  vatNumber: '',
-  address: '',
-  city: '',
-  zipCode: '',
-  state: '',
-  email: '',
-  phone: '',
-  sdiCode: '',
-  pecEmail: '',
-  personnelInfo: '',
-  manager: {
-    name: '',
-    email: '',
-    phone: ''
-  },
-  controller: {
-    name: '',
-    email: '',
-    phone: ''
-  },
-  processor: {
-    name: '',
-    email: '',
-    phone: ''
-  }
-});
+function ensurePJSDom() {
+  // 👉 corrige le crash "reading 'push' of null" dans particles.js
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
 
-// Récupérer les données de l'organisation depuis l'API
-const fetchOrganization = async () => {
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => (s.src || '').includes(src))) return resolve()
+    const s = document.createElement('script')
+    s.src = src; s.async = true
+    s.onload = resolve; s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+function destroyFor(el) {
   try {
-    isLoading.value = true;
-    error.value = null;
-    
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('No authentication token found');
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) { try { entry.pJS.fn.vendors.destroypJS() } catch {} }
+        return !same
+      })
     }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
 
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api/complete-organization`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+function initParticles() {
+  const el = document.getElementById(CONTAINER_ID)
+  if (!el || !window.particlesJS) return
+  ensurePJSDom()
+  destroyFor(el)
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || 'Failed to fetch organization data');
-    }
-
-    const data = await response.json();
-    
-    // Mettre à jour les données de l'organisation
-    org.value = {
-      name: data.name || '',
-      vatNumber: data.vat_number || '',
-      address: data.address || '',
-      city: data.city || '',
-      zipCode: data.zip_code || '',
-      state: data.state || '',
-      email: data.contact_email || '',
-      phone: data.contact_phone || '',
-      sdiCode: data.sdi_code || '',
-      pecEmail: data.pec_email || '',
-      personnelInfo: data.personnel_info || '',
-      manager: {
-        name: data.manager?.name || 'N/A',
-        email: data.manager?.email || 'N/A',
-        phone: data.manager?.phone || 'N/A',
-      },
-      controller: {
-        name: data.controller?.name || 'N/A',
-        email: data.controller?.email || 'N/A',
-        phone: data.controller?.phone || 'N/A',
-      },
-      processor: {
-        name: data.processor?.name || 'N/A',
-        email: data.processor?.email || 'N/A',
-        phone: data.processor?.phone || 'N/A',
-      },
-    };
-    
-  } catch (err) {
-    console.error('Error fetching organization:', err);
-    const message = err.message || 'An error occurred while loading organization data';
-    error.value = message;
-    errorMessage.value = message;
-    showError.value = true;
-    
-    // Rediriger vers la page de connexion si non authentifié
-    if (err.message.includes('token') || err.message.includes('authenticate')) {
-      router.push('/login');
-    }
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-// Fonction pour gérer les particules d'arrière-plan
-const renderParticles = () => {
-  const theme = document.documentElement.getAttribute('data-theme');
-  const isDark = theme === 'dark';
-
-  const oldCanvas = document.querySelector('#particles-js > canvas');
-  if (oldCanvas) oldCanvas.remove();
-
-  window.particlesJS('particles-js', {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+  window.particlesJS(CONTAINER_ID, {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: isDark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: isDark ? 0.5 : 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: isDark ? '#ffffff' : '#888888',
-        opacity: isDark ? 0.4 : 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+      color:  { value: dark ? '#ffffff' : '#888888' },
+      shape:  { type: 'circle' },
+      opacity:{ value: dark ? 0.5 : 0.35 },
+      size:   { value: 3, random: true },
+      line_linked: { enable: true, distance: 150, color: dark ? '#ffffff' : '#E0E0E0', opacity: 0.35, width: 1 },
+      move: { enable: true, speed: 2, direction: 'none', out_mode: 'out' }
     },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
+    interactivity: { detect_on: 'canvas', events: { onhover: { enable: true, mode: 'grab' }, resize: true },
+      modes: { grab: { distance: 140, line_linked: { opacity: 1 } } } },
     retina_detect: true
   })
 }
 
-async function initializeParticles() {
-  // 1) wait DOM
-  await nextTick()
+/* ----- Données locales (inchangé) ----- */
+function readLocal() { try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') } catch { return null } }
+const org = ref(readLocal())
+const manager    = computed(() => org.value?.manager    || {})
+const technical  = computed(() => org.value?.technical  || null)
+const controller = computed(() => org.value?.controller || {})
+const processor  = computed(() => org.value?.processor  || {})
+const hasTechnical = computed(() => !!(technical.value && (technical.value.name || technical.value.email || technical.value.phone)))
+function safe(v) { return (v ?? '').toString().trim() || '—' }
+function person(p) { return { name: safe(p?.name), email: safe(p?.email), phone: safe(p?.phone) } }
+function clearLocal() { localStorage.removeItem('organization_profile'); org.value = null }
 
-  // 2) load script if needed
-  if (!window.particlesJS) {
-    await new Promise(resolve => {
-      const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
-      s.onload = resolve
-      document.body.appendChild(s)
-    })
-  }
-
-  // 3) initial render
-  renderParticles()
-
-  // 4) observe theme changes
-  new MutationObserver(muts => {
-    muts.forEach(m => {
-      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-        renderParticles()
-      }
-    })
-  }).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme', 'class']
-  })
-}
-
-// --- mount ---
 onMounted(async () => {
-  document.title = 'NetSecure-IQ - Organization Profile';
-  await nextTick();
-  await initializeParticles();
-  await fetchOrganization();
-  showSuccess.value = true;
-  setTimeout(() => showSuccess.value = false, 3000);
+  document.title = 'NetSecure-IQ - Organization Profile'
+  org.value = readLocal()
+
+  try { await loadScriptOnce('/particles/particles.min.js') }
+  catch { await loadScriptOnce('https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js') }
+
+  ensurePJSDom()
+  initParticles()
+
+  themeObserver = new MutationObserver(m => {
+    if (m.some(x => x.attributeName === 'data-theme')) initParticles()
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+
+onBeforeUnmount(() => {
+  themeObserver?.disconnect?.()
+  destroyFor(document.getElementById(CONTAINER_ID))
 })
 </script>
 
 <style scoped>
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 
-/* Notifications */
-.notification {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  padding: 15px 20px;
-  border-radius: 8px;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  max-width: 400px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: slideIn 0.3s ease-out;
-}
+:root{ --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+--text-primary:#f5f7fa; --text-secondary:#9ca3af; --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+--radius:16px; --danger:#ef4444; --success:#22c55e; }
 
-.notification.error {
-  background-color: #ff4d4f;
-}
+.org-page{ position:relative; min-height:100vh; overflow:hidden; }
+.particles-layer{ position:fixed; inset:0; width:100vw; height:100vh; z-index:0; pointer-events:none; }
 
-.notification.success {
-  background-color: #52c41a;
-}
+.wrapper{ position:relative; z-index:10; display:flex; align-items:flex-start; justify-content:center; padding:32px; min-height:100vh; }
+.container{ width:100%; max-width:1000px; }
+.card{ background:var(--panel-grey); border-radius:var(--radius); padding:26px; border:1px solid rgba(255,255,255,.06); box-shadow:0 0 40px rgba(0,194,194,.05); }
 
-.notification .close-btn {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 20px;
-  cursor: pointer;
-  margin-left: 15px;
-  padding: 0 5px;
-  line-height: 1;
-}
+.title{ text-align:center; font-size:20px; font-weight:600; color:var(--primary-accent); margin-bottom:6px; }
+.subtitle{ text-align:center; font-size:16px; margin-bottom:20px; }
 
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
+.section{ margin-top:16px; padding:14px; border:1px solid rgba(255,255,255,.05); border-radius:12px; background:rgba(31,41,55,.30); }
+.section-title{ margin:0 0 10px; color:var(--primary-accent); font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; }
 
-/* Loading indicator */
-.loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
+.grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; }
+.row{ display:flex; flex-direction:column; gap:6px; }
+.row.wide{ grid-column: 1 / -1; }
+label{ font-size:12px; color:var(--text-secondary); }
+span{ font-size:14px; color:var(--text-primary); }
 
-.loading-spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-}
+.pre{ white-space:pre-wrap; background:#0b0e16; border:1px solid var(--divider-grey); border-radius:8px; padding:10px 12px; color:#e5e7eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+.actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap; }
+.btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; border-radius:8px; font-weight:700; cursor:pointer; padding:10px 14px; transition:.2s; }
+.btn.primary{ background:var(--primary-accent); color:#0e111a; }
+.btn.primary:hover{ background:var(--primary-hover); color:#fff; }
+.btn.ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); color:var(--text-primary); }
+.btn.ghost:hover{ background:rgba(255,255,255,.10); }
 
-:root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00c2c2;
-  --primary-hover: #00a7a7;
-  --border-radius: 12px;
-  --transition: all 0.2s ease;
-}
-/* hide any theme‐toggle you might have globally */
-.theme-switcher { display: none!important; }
-
-.login-page {
-  position: relative;
-  min-height: 100vh;
-  background-color: var(--bg-dark);
-  overflow: hidden;
-}
-
-#particles-js {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100vw; height: 100vh;
-  z-index: 0;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
-  pointer-events: none;
-}
-[data-theme='light'] #particles-js {
-  background-color: #E0E0E0;
-}
-
-.login-wrapper {
-  position: relative; z-index: 10;
-  display: flex; align-items: center; justify-content: center;
-  padding: 32px; min-height: 100vh;
-}
-
-.login-container {
-  width: 100%; max-width: 800px;
-}
-
-.login-card {
-  background-color: var(--panel-grey);
-  border-radius: 16px;
-  padding: 32px;
-  border: 1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 0 40px rgba(0,194,194,0.05);
-  box-sizing: border-box;
-}
-
-.login-title {
-  text-align: center;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--primary-accent);
-  margin-bottom: 8px;
-}
-.login-subtitle {
-  text-align: center;
-  font-size: 18px;
-  color: var(--text-primary);
-  margin-bottom: 32px;
-  font-weight: 500;
-}
-
-.login-form {
-  display: flex; flex-direction: column; gap: 16px;
-}
-
-.form-section {
-  background-color: rgba(31,41,55,0.3);
-  border-radius: 8px;
-  padding: 16px;
-  transition: background-color 0.3s ease;
-}
-:root:not([data-theme='dark']) .form-section {
-  background-color: rgba(243,244,246,0.5);
-  border: 1px solid rgba(209,213,219,0.5);
-}
-.form-section h4 {
-  color: var(--primary-accent);
-  margin: 0 0 16px;
-  font-size: 16px; font-weight: 500;
-  display: flex; align-items: center; gap: 8px;
-}
-
-.login-form input {
-  width: 100%;
-  background-color: var(--panel-grey);
-  border: 1px solid var(--divider-grey);
-  border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: var(--transition);
-  margin-bottom: 8px;
-}
-
-.form-row {
-  display: flex; gap: 16px; margin-bottom: 8px;
-}
-.form-row input { margin-bottom: 0; }
-
-.form-actions {
-  display: flex; justify-content: center; margin-top: 24px; gap: 16px;
-}
-
-.btn {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: var(--transition);
-  display: inline-flex; align-items: center; gap: 8px;
-}
-
-.btn-primary {
-  background-color: var(--primary-accent);
-  color: #0e111a;
-}
-.btn-primary:hover {
-  background-color: var(--primary-hover);
-}
-
-@media (max-width: 768px) {
-  .login-wrapper { padding: 16px; }
-  .login-card   { padding: 24px; }
-  .form-row     { flex-direction: column; gap: 8px; }
-  .form-actions { flex-direction: column; }
-  .btn          { width: 100%; }
-}
+.empty{ text-align:center; color:var(--text-secondary); padding:10px 0 4px; display:grid; gap:12px; }
+@media (max-width: 720px){ .wrapper{ padding:16px; } .card{ padding:20px; } }
 </style>
+===== END: src/frontend/src/components/organization/OrganizationProfile.vue =====

@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <!-- Canvas animé -->
-    <div id="particles-js"></div>
+    <div id="login-particles"></div>
 
     <!-- Formulaire de login -->
     <div class="login-wrapper">
@@ -46,7 +46,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 
@@ -58,29 +58,59 @@ const loading = ref(false)
 const router = useRouter()
 const { login: setAuthLogin } = useAuth()
 
-/**
- * Initialise ou recharge particles.js en fonction du thème actuel.
- */
-function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
+/* ------------------------------------------------------------------
+   Particles.js — sécurisation anti "Cannot read properties of null (push)"
+   - Toujours forcer window.pJSDom à être un tableau
+   - Détruire proprement l'instance rattachée au conteneur
+-------------------------------------------------------------------*/
+function ensurePJSDom () {
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+function destroyLoginParticles () {
+  const el = document.getElementById('login-particles')
+  try {
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) {
+          try { entry.pJS.fn.vendors.destroypJS() } catch {}
+        }
+        return !same
+      })
+    }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
 
-  window.particlesJS('particles-js', {
+/** (Re)rend le fond animé en respectant le thème */
+function renderParticles () {
+  const id = 'login-particles'
+  const el = document.getElementById(id)
+  if (!el || !window.particlesJS) return
+
+  ensurePJSDom()
+  destroyLoginParticles()
+
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
+
+  window.particlesJS(id, {
     particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
+      number: { value: 75, density: { enable: true, value_area: 800 } },
       color: { value: dark ? '#ffffff' : '#555555' },
       shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.5 },
+      opacity: { value: 0.5 },
       size: { value: 3, random: true },
       line_linked: {
         enable: true,
         distance: 150,
         color: dark ? '#ffffff' : '#888888',
-        opacity: dark ? 0.4 : 0.4,
+        opacity: 0.4,
         width: 1
       },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+      move: { enable: true, speed: 4, direction: 'none', out_mode: 'bounce' }
     },
     interactivity: {
       detect_on: 'canvas',
@@ -89,51 +119,52 @@ function renderParticles() {
         onclick: { enable: true, mode: 'push' },
         resize: true
       },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
+      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
     },
     retina_detect: true
   })
 }
 
 // S'assure que particles est chargé après le DOM et le thème
-async function initializeParticles() {
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
+async function initializeParticles () {
+  const id = 'login-particles'
+  if (!document.getElementById(id)) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    return initializeParticles()
   }
 
   if (!window.particlesJS) {
     await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
+      const script = document.createElement('script')
+      script.src = '/particles/particles.min.js'
+      script.onload = resolve
+      document.body.appendChild(script)
+    })
   }
 
-  await nextTick();
-  renderParticles();
+  ensurePJSDom()
+  await nextTick()
+  renderParticles()
 
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme') {
-        renderParticles();
-      }
-    }
-  });
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  });
+  // Re-render quand le thème change
+  const obs = new MutationObserver(muts => {
+    if (muts.some(m => m.attributeName === 'data-theme')) renderParticles()
+  })
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 }
 
 onMounted(() => {
-  initializeParticles();
+  initializeParticles()
 })
 
+onUnmounted(() => {
+  destroyLoginParticles()
+  ensurePJSDom() // ne jamais remettre window.pJSDom à null
+})
+
+/* ------------------------------------------------------------------
+   Auth
+-------------------------------------------------------------------*/
 const login = async () => {
   loading.value = true
   try {
@@ -160,7 +191,7 @@ const login = async () => {
     localStorage.setItem('role', data.role?.toLowerCase() || '')
     localStorage.setItem('organization_id', data.organization_id || '')
 
-    // >>> IMPORTANT : informer l'app qu'on vient de se loguer (maj de la nav)
+    // informer l'app qu'on vient de se loguer (maj de la nav)
     window.dispatchEvent(new Event('auth-changed'))
 
     // Choix de la redirection
@@ -169,7 +200,7 @@ const login = async () => {
     if (role === 'user') redirectTo = '/routertable'
     else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
 
-    if (typeof setAuthLogin === 'function') setAuthLogin();
+    if (typeof setAuthLogin === 'function') setAuthLogin()
     setTimeout(() => router.push(redirectTo), 200)
   } catch (err) {
     message.value = 'Error: ' + err.message
@@ -201,7 +232,7 @@ const login = async () => {
 }
 
 /* Canvas particles */
-#particles-js {
+#login-particles {
   position: fixed;
   top: 0;
   left: 0;
@@ -210,10 +241,11 @@ const login = async () => {
   z-index: 0;
   background-color: var(--bg-dark);
   transition: background-color 0.3s ease;
+  pointer-events: none;
 }
 
 /* override light mode */
-[data-theme='light'] #particles-js {
+[data-theme='light'] #login-particles {
   background-color: #E0E0E0;
 }
 

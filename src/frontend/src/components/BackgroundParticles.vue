@@ -21,22 +21,32 @@ function loadScriptOnce(src) {
   })
 }
 
+/** ⚠️ Toujours garantir un tableau pour éviter "reading 'push' of null" */
+function ensurePJSDom() {
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+
 function destroyInstance(el) {
-  const list = (window.pJSDom || [])
-  const entry = list.find(d => d && d.pJS && d.pJS.canvas.el && d.pJS.canvas.el.parentElement === el)
-  if (entry?.pJS?.fn?.vendors?.destroypJS) {
-    entry.pJS.fn.vendors.destroypJS()
-  }
+  ensurePJSDom()
+  const entry = window.pJSDom.find(d => d?.pJS?.canvas?.el?.parentElement === el)
+  try {
+    entry?.pJS?.fn?.vendors?.destroypJS?.()
+  } catch {}
+  // Nettoyage du tableau (et des canvases orphelins)
+  window.pJSDom = window.pJSDom.filter(d => d?.pJS?.canvas?.el?.parentElement !== el)
+  el?.querySelectorAll('canvas')?.forEach(c => c.remove())
 }
 
 function initParticles() {
   const el = document.getElementById('particles-js')
   if (!el || !window.particlesJS) return
 
-  // détruire l’instance précédente sur ce conteneur (si re-montage/re-theme)
+  ensurePJSDom()
   destroyInstance(el)
 
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
 
   window.particlesJS('particles-js', {
     particles: {
@@ -63,26 +73,29 @@ function initParticles() {
 let themeObserver
 
 onMounted(async () => {
-  // Charge local si dispo, sinon fallback CDN
   try {
     await loadScriptOnce('/particles/particles.min.js')
   } catch {
     await loadScriptOnce('https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js')
   }
 
+  ensurePJSDom()
   initParticles()
 
   // Re-render au changement de thème
   themeObserver = new MutationObserver(muts => {
-    if (muts.some(m => m.attributeName === 'data-theme')) initParticles()
+    if (muts.some(m => m.attributeName === 'data-theme')) {
+      ensurePJSDom()
+      initParticles()
+    }
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 
 onUnmounted(() => {
-  if (themeObserver?.disconnect) themeObserver.disconnect()
-  const el = document.getElementById('particles-js')
-  if (el) destroyInstance(el)
+  themeObserver?.disconnect?.()
+  destroyInstance(document.getElementById('particles-js'))
+  ensurePJSDom() // ne jamais laisser null
 })
 </script>
 
@@ -92,8 +105,8 @@ onUnmounted(() => {
   inset: 0;
   width: 100vw;
   height: 100vh;
-  z-index: 0;            /* visible derrière le contenu, plus de -1 */
-  pointer-events: none;  /* clics passent au travers */
+  z-index: 0;
+  pointer-events: none;
   background: transparent;
   opacity: .9;
 }

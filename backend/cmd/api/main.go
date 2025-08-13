@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"backend/internal/handlers"
@@ -31,16 +32,18 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Auth
-	mux.HandleFunc("/api/auth/login", withCORS(auth.Login))
-	mux.HandleFunc("/api/login",       withCORS(auth.Login)) // alias pour l'ancien front
-	mux.HandleFunc("/api/auth/me",     withCORS(auth.Me))
+	mux.HandleFunc("/api/auth/login", auth.Login)
+	mux.HandleFunc("/api/login", auth.Login) // alias pour l'ancien front
+	mux.HandleFunc("/api/auth/me", auth.Me)
 
 	// Organization (GET/POST)
-	mux.HandleFunc("/api/complete-organization", withCORS(org.CompleteOrganization))
+	mux.HandleFunc("/api/complete-organization", org.CompleteOrganization)
 
+	// Server
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           logRequests(mux),
+		// CORS GLOBAL + logging (le CORS s'applique à toutes les routes et mêmes aux 404/500)
+		Handler:           corsMiddleware(logRequests(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Println("API listening on", addr)
@@ -54,18 +57,33 @@ func getenv(k, def string) string {
 	return def
 }
 
-// CORS minimal
-func withCORS(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+// -------- CORS global, compatible préflight --------
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		// Autorise l'origine appelante (au lieu de '*', pour éviter certains blocages navigateurs)
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+		reqHdrs := r.Header.Get("Access-Control-Request-Headers")
+		if strings.TrimSpace(reqHdrs) == "" {
+			reqHdrs = "Authorization, Content-Type"
+		}
+		w.Header().Set("Access-Control-Allow-Headers", reqHdrs)
+
+		// Préflight : renvoyer tout de suite
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		h.ServeHTTP(w, r)
-	}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Logging minimal
