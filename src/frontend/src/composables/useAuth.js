@@ -8,13 +8,15 @@ function login() {
 
 function logout() {
   isAuthenticated.value = false;
-  window.location.reload();
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('organization_id');
+  localStorage.removeItem('user_id');
+  window.dispatchEvent(new Event('auth-changed'));
+  // redirection propre
+  window.location.replace('/#/login');
 }
 
 export function useAuth() {
-  return {
-    isAuthenticated,
-    login,
-    logout,
-  };
+  return { isAuthenticated, login, logout };
 }

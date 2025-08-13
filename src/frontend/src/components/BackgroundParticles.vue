@@ -1,127 +1,100 @@
 <template>
-  <div id="particles-js"></div>
+  <!-- Un seul conteneur pour cette instance -->
+  <div id="particles-js" class="particles-layer"></div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue';
-import 'particles.js';
+import { onMounted, onUnmounted } from 'vue'
 
-let particlesInstance = null;
+/** Charge un script une seule fois (par URL) */
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => (s.src || '').includes(src))) {
+      resolve(); return
+    }
+    const s = document.createElement('script')
+    s.src = src
+    s.async = true
+    s.onload = resolve
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
 
-const initializeParticles = () => {
-  if (window.particlesJS) {
-    particlesInstance = window.particlesJS('particles-js', {
-      particles: {
-        number: {
-          value: 80,
-          density: {
-            enable: true,
-            value_area: 800
-          }
-        },
-        color: {
-          value: '#3B82F6' // blue-500
-        },
-        shape: {
-          type: 'circle'
-        },
-        opacity: {
-          value: 0.5,
-          random: true
-        },
-        size: {
-          value: 3,
-          random: true
-        },
-        line_linked: {
-          enable: true,
-          distance: 150,
-          color: '#93C5FD', // blue-300
-          opacity: 0.4,
-          width: 1
-        },
-        move: {
-          enable: true,
-          speed: 2,
-          direction: 'none',
-          random: true,
-          straight: false,
-          out_mode: 'out',
-          bounce: false
-        }
+function destroyInstance(el) {
+  const list = (window.pJSDom || [])
+  const entry = list.find(d => d && d.pJS && d.pJS.canvas.el && d.pJS.canvas.el.parentElement === el)
+  if (entry?.pJS?.fn?.vendors?.destroypJS) {
+    entry.pJS.fn.vendors.destroypJS()
+  }
+}
+
+function initParticles() {
+  const el = document.getElementById('particles-js')
+  if (!el || !window.particlesJS) return
+
+  // détruire l’instance précédente sur ce conteneur (si re-montage/re-theme)
+  destroyInstance(el)
+
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+
+  window.particlesJS('particles-js', {
+    particles: {
+      number: { value: 80, density: { enable: true, value_area: 800 } },
+      color:  { value: dark ? '#ffffff' : '#888888' },
+      shape:  { type: 'circle' },
+      opacity:{ value: dark ? 0.5 : 0.35 },
+      size:   { value: 3, random: true },
+      line_linked: {
+        enable: true, distance: 150,
+        color: dark ? '#ffffff' : '#E0E0E0', opacity: dark ? 0.4 : 0.3, width: 1
       },
-      interactivity: {
-        detect_on: 'canvas',
-        events: {
-          onhover: {
-            enable: true,
-            mode: 'grab'
-          },
-          onclick: {
-            enable: false
-          },
-          resize: true
-        },
-        modes: {
-          grab: {
-            distance: 140,
-            line_linked: {
-              opacity: 1
-            }
-          }
-        }
-      },
-      retina_detect: true
-    });
-  }
-};
+      move: { enable: true, speed: 2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: true, mode: 'grab' }, resize: true },
+      modes: { grab: { distance: 140, line_linked: { opacity: 1 } } }
+    },
+    retina_detect: true
+  })
+}
 
-const handleResize = () => {
-  if (particlesInstance && particlesInstance.pJSDom && particlesInstance.pJSDom.length > 0) {
-    particlesInstance.pJSDom[0].pJS.particles.move.speed = window.innerWidth < 768 ? 1 : 2;
-    particlesInstance.pJSDom[0].pJS.fn.particlesRefresh();
-  }
-};
+let themeObserver
 
-onMounted(() => {
-  // Load particles.js dynamically if not already loaded
-  if (!window.particlesJS) {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js';
-    script.onload = () => {
-      initializeParticles();
-      window.addEventListener('resize', handleResize);
-    };
-    document.head.appendChild(script);
-  } else {
-    initializeParticles();
-    window.addEventListener('resize', handleResize);
+onMounted(async () => {
+  // Charge local si dispo, sinon fallback CDN
+  try {
+    await loadScriptOnce('/particles/particles.min.js')
+  } catch {
+    await loadScriptOnce('https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js')
   }
-});
+
+  initParticles()
+
+  // Re-render au changement de thème
+  themeObserver = new MutationObserver(muts => {
+    if (muts.some(m => m.attributeName === 'data-theme')) initParticles()
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize);
-  if (particlesInstance && particlesInstance.pJSDom && particlesInstance.pJSDom[0]) {
-    particlesInstance.pJSDom[0].pJS.fn.vendors.destroypJS();
-    particlesInstance = null;
-  }
-});
+  if (themeObserver?.disconnect) themeObserver.disconnect()
+  const el = document.getElementById('particles-js')
+  if (el) destroyInstance(el)
+})
 </script>
 
 <style scoped>
-#particles-js {
+.particles-layer {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: -1;
-  background-color: var(--bg-page);
-  opacity: 0.6;
-}
-
-/* Dark mode adjustments */
-:root[data-theme="dark"] #particles-js {
-  background-color: var(--bg-page);
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;            /* visible derrière le contenu, plus de -1 */
+  pointer-events: none;  /* clics passent au travers */
+  background: transparent;
+  opacity: .9;
 }
 </style>

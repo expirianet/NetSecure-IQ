@@ -7,9 +7,6 @@
     <main class="main-content">
       <router-view />
     </main>
-
-    <!-- Canvas pour particles.js -->
-    <div id="particles-js"></div>
   </div>
 </template>
 
@@ -40,76 +37,10 @@ watch(theme, (newTheme) => {
   localStorage.setItem('theme', newTheme)
 })
 
-/* ---------- particles.js ---------- */
-function initParticles() {
-  const dark = theme.value === 'dark'
-  if (!window.particlesJS) return
-
-  // Détruire l'ancien canvas
-  const oldCanvas = document.querySelector('#particles-js > canvas')
-  if (oldCanvas) oldCanvas.remove()
-
-  window.particlesJS('particles-js', {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#888888' },
-      shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.3 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#E0E0E0',
-        opacity: dark ? 0.4 : 0.3,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
-    retina_detect: true
-  })
-}
-
-function attachThemeObserver() {
-  const observer = new MutationObserver(() => initParticles())
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  })
-  return observer
-}
-
 /* ---------- Lifecycle ---------- */
-let themeObserver
-
 onMounted(async () => {
-  // Appliquer le thème
+  // Appliquer le thème au démarrage
   document.documentElement.setAttribute('data-theme', theme.value)
-
-  // Charger particles si nécessaire
-  if (!window.particlesJS) {
-    const script = document.createElement('script')
-    script.src = '/particles/particles.min.js'
-    script.onload = () => {
-      initParticles()
-      themeObserver = attachThemeObserver()
-    }
-    document.body.appendChild(script)
-  } else {
-    initParticles()
-    themeObserver = attachThemeObserver()
-  }
 
   // Écoutes pour mettre à jour la nav quand l’auth change
   window.addEventListener('storage', updateRoleFromStorage)
@@ -123,7 +54,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('storage', updateRoleFromStorage)
   window.removeEventListener('auth-changed', updateRoleFromStorage)
-  if (themeObserver?.disconnect) themeObserver.disconnect()
 })
 </script>
 
@@ -177,17 +107,5 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-/* Canvas particles */
-#particles-js {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
 }
 </style>

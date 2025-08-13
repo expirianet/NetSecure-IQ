@@ -8,6 +8,7 @@ import OrganizationProfile from '@/components/organization/OrganizationProfile.v
 import RouterTable from '@/components/RouterTable.vue'
 import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
+import DashboardOperator from '@/components/DashboardOperator.vue' // <-- NEW
 
 import { useAuth } from '../composables/useAuth';
 
@@ -18,18 +19,25 @@ const routes = [
   { path: '/', component: HomePage },
   { path: '/login', component: LoginForm },
   { path: '/register', component: RegisterForm },
+
+  // Dashboards
   { path: '/dashboard', component: DashboardPage, meta: { requiresAuth: true } },
+  { path: '/dashboard-operator', component: DashboardOperator, meta: { requiresAuth: true } }, // <-- NEW
+
+  // Organization
   { path: '/organization', component: OrganizationProfile, meta: { requiresAuth: true } },
   { path: '/organization/edit', component: OrganizationForm, meta: { requiresAuth: true } },
   { path: '/organizationForm', component: OrganizationForm, meta: { requiresAuth: true } },
+
+  // Features
   { path: '/routertable', component: RouterTable, meta: { requiresAuth: true } },
   { path: '/adduser', component: AddUserForm, meta: { requiresAuth: true } },
   { path: '/addoperator', component: AddOperatorForm, meta: { requiresAuth: true } },
+
+  // Agents
   { path: '/agents', component: AgentDashboard, meta: { requiresAuth: true } },
   { path: '/agents/register', component: RegisterAgent, meta: { requiresAuth: true } }
 ];
-
-
 
 const router = createRouter({
   history: createWebHashHistory(),
