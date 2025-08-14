@@ -120,9 +120,8 @@ const register = async () => {
 }
 
 /* override light mode */
-[data-theme='light'] #register-particles {
-  background-color: #E0E0E0;
-}
+[data-theme='light'] #register-particles { background-color: #f6f8fb; }
+
 
 /* Wrapper du formulaire */
 .register-wrapper {

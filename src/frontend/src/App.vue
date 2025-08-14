@@ -72,17 +72,59 @@ onUnmounted(() => {
 }
 
 /* Override pour le mode clair */
+/* Override pour le mode clair (v2) */
 [data-theme='light'] {
-  --bg-dark: #ffffff;
-  --panel-grey: #f5f5f5;
-  --divider-grey: #e0e0e0;
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
-  --primary-accent: #00a8a8;
-  --primary-hover: #008a8a;
+  /* surfaces */
+  --bg-dark: #f6f8fb;            /* fond page */
+  --panel-grey: #ffffff;         /* cartes/panels */
+  --divider-grey: #e5e7eb;       /* traits/borders */
+
+  /* textes */
+  --text-primary: #0f172a;       /* slate-900 */
+  --text-secondary: #475569;     /* slate-600 */
+
+  /* accent */
+  --primary-accent: #0ea5a5;     /* teal-600 */
+  --primary-hover: #0b8f8f;      /* teal-700 */
+
   --danger: #dc2626;
-  --success: #22c55e;
+  --success: #16a34a;
+
+  /* nouveaux tokens */
+  --panel-border: rgba(2, 6, 23, 0.08);
+  --panel-shadow: 0 12px 32px rgba(2, 6, 23, 0.08), 0 1px 0 rgba(2, 6, 23, 0.04);
+  --muted-surface: rgba(2, 6, 23, 0.04);
 }
+
+/* Améliorations globales light sans changer la forme */
+[data-theme='light'] .login-card,
+[data-theme='light'] .register-card,
+[data-theme='light'] .adduser-card,
+[data-theme='light'] .opdash-shell,
+[data-theme='light'] .card,
+[data-theme='light'] .tile,
+[data-theme='light'] .form-section,
+[data-theme='light'] .table-wrapper,
+[data-theme='light'] .org-card {
+  border-color: var(--panel-border) !important;
+  box-shadow: var(--panel-shadow) !important;
+  background: var(--panel-grey);
+}
+
+/* Surfaces “muted” (tiles, sections…) */
+[data-theme='light'] .tile {
+  background: var(--muted-surface);
+}
+[data-theme='light'] .form-section {
+  background: rgba(2, 6, 23, 0.03);
+}
+
+/* Focus ring propre et accessible */
+:focus-visible {
+  outline: 2px solid var(--primary-accent);
+  outline-offset: 2px;
+}
+
 
 /* Style global */
 body {

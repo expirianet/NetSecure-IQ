@@ -77,9 +77,8 @@ onBeforeUnmount(() => {
 }
 
 /* override light mode */
-[data-theme='light'] #home-particles {
-  background-color: #E0E0E0;
-}
+[data-theme='light'] #home-particles { background-color: #f6f8fb; }
+
 
 /* Wrapper du contenu */
 .home-wrapper {

@@ -203,7 +203,8 @@ Data Processor:
   position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0;
   background-color: var(--bg-dark); pointer-events: none; transition: background-color .3s;
 }
-[data-theme='light'] #org-form-particles { background-color: #E0E0E0; }
+[data-theme='light'] #org-form-particles { background-color: #f6f8fb; }
+
 
 .login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
 .login-container { width: 100%; max-width: 800px; }

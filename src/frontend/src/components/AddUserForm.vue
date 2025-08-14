@@ -355,7 +355,8 @@ onBeforeUnmount(() => {
   z-index: 0; background-color: var(--bg-dark);
   transition: background-color .3s ease; pointer-events: none;
 }
-[data-theme='light'] #adduser-particles { background-color: #E0E0E0; }
+[data-theme='light'] #adduser-particles { background-color: #f6f8fb; }
+
 
 /* Wrapper & card (même style que Login) */
 .adduser-wrapper {

@@ -161,9 +161,8 @@ const login = async () => {
 }
 
 /* override light mode */
-[data-theme='light'] #login-particles {
-  background-color: #E0E0E0;
-}
+[data-theme='light'] #login-particles { background-color: #f6f8fb; }
+
 
 /* Wrapper du formulaire */
 .login-wrapper {
