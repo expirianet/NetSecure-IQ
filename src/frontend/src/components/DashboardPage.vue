@@ -1,126 +1,180 @@
 <template>
-  <div class="dashboard-page">
-    <div id="particles-js"></div>
-
-    <div class="dashboard-wrapper">
-      <div class="dashboard-container">
-        <div class="dashboard-card">
-          <h1 class="dashboard-title">Dashboard</h1>
-
-          <div v-if="isAdminOrOperator" class="dashboard-actions">
-            <router-link class="dashboard-button" to="/routertable">
-              <i class="fas fa-network-wired"></i>
-              Router Info
-            </router-link>
-
-            <router-link v-if="!needsOrganization" class="dashboard-button" to="/adduser">
-              <i class="fas fa-user-plus"></i>
-              Add User
-            </router-link>
-
-            <router-link v-else class="dashboard-button" to="/organization">
-              <i class="fas fa-building"></i>
-              Organization Info
-            </router-link>
-
-            <router-link v-if="canAddOperator" class="dashboard-button" to="/addoperator">
-              <i class="fas fa-user-shield"></i>
-              Add Operator
-            </router-link>
-          </div>
-
-          <div v-else class="welcome-message">
-            <p>Welcome to your dashboard. Select an option to get started.</p>
+    <div class="dash-page">
+      <BackgroundParticles />
+  
+      <div class="wrapper">
+        <div class="container">
+          <div class="card">
+            <header class="head">
+              <div class="title">
+                <h1>Dashboard</h1>
+                <p class="muted">Vue générale & accès rapide</p>
+              </div>
+  
+              <div v-if="hasOrganization" class="status-pill">
+                <span class="dot"></span> org : <code>{{ orgId }}</code>
+              </div>
+            </header>
+  
+            <section class="grid">
+              <router-link class="tile" to="/organization">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-building"></i></div>
+                  <div class="labels">
+                    <h3>Organisation</h3>
+                    <p class="muted">Profil & conformité</p>
+                  </div>
+                </div>
+                <ul class="info">
+                  <li><span class="hint">Nom</span><span class="val">{{ orgName || '—' }}</span></li>
+                  <li><span class="hint">Ville</span><span class="val">{{ orgCity || '—' }}</span></li>
+                  <li><span class="hint">Email</span><span class="val">{{ orgEmail || '—' }}</span></li>
+                </ul>
+                <div class="cta">Ouvrir le profil</div>
+              </router-link>
+  
+              <router-link class="tile" to="/routertable">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-network-wired"></i></div>
+                  <div class="labels">
+                    <h3>RouterTable</h3>
+                    <p class="muted">État des routeurs</p>
+                  </div>
+                </div>
+                <p class="muted">Consultez les statuts en un coup d’œil.</p>
+                <div class="cta">Voir le tableau</div>
+              </router-link>
+  
+              <router-link class="tile" to="/adduser">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-user-plus"></i></div>
+                  <div class="labels">
+                    <h3>Add User</h3>
+                    <p class="muted">Inviter un utilisateur</p>
+                  </div>
+                </div>
+                <p v-if="!hasOrganization" class="warn">Rattachez d’abord une organisation</p>
+                <div v-else class="cta">Créer un utilisateur</div>
+              </router-link>
+  
+              <router-link class="tile" to="/addoperator">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-user-gear"></i></div>
+                  <div class="labels">
+                    <h3>Add Operator</h3>
+                    <p class="muted">Inviter un opérateur</p>
+                  </div>
+                </div>
+                <div class="cta">Créer un opérateur</div>
+              </router-link>
+  
+              <router-link class="tile" to="/agents">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-microchip"></i></div>
+                  <div class="labels">
+                    <h3>Agents</h3>
+                    <p class="muted">MikroTik déployés</p>
+                  </div>
+                </div>
+                <div class="cta">Gérer les agents</div>
+              </router-link>
+  
+              <router-link class="tile" to="/agents/register">
+                <div class="tile-head">
+                  <div class="icon-wrap"><i class="fas fa-keyboard"></i></div>
+                  <div class="labels">
+                    <h3>Pré-enregistrement</h3>
+                    <p class="muted">Script MikroTik .rsc</p>
+                  </div>
+                </div>
+                <div class="cta">Générer un script</div>
+              </router-link>
+            </section>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</template>
-
-<script setup>
-import { computed, onMounted, nextTick } from 'vue'
-
-const role = computed(() => (localStorage.getItem('role') || '').toLowerCase())
-const isAdmin = computed(() => role.value === 'administrator')
-const isOperator = computed(() => role.value === 'operator')
-const isAdminOrOperator = computed(() => isAdmin.value || isOperator.value)
-
-const hasOrganization = computed(() => !!String(localStorage.getItem('organization_id') || '').trim())
-const needsOrganization = computed(() => !hasOrganization.value)
-const canAddOperator = computed(() => isAdmin.value || (isOperator.value && hasOrganization.value))
-
-function renderParticles() {
-  const dark =
-    document.documentElement.getAttribute('data-theme') === 'dark' ||
-    document.documentElement.classList.contains('dark')
-
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
-
-  if (window.particlesJS) {
-    window.particlesJS('particles-js', {
-      particles: {
-        number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: dark ? '#ffffff' : '#555555' },
-        shape: { type: 'circle' },
-        opacity: { value: 0.5 },
-        size: { value: 3, random: true },
-        line_linked: {
-          enable: true, distance: 150,
-          color: dark ? '#ffffff' : '#888888', opacity: 0.4, width: 1
-        },
-        move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-      },
-      interactivity: {
-        detect_on: 'canvas',
-        events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
-        modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
-      },
-      retina_detect: true
-    })
+  </template>
+  
+  <script setup>
+  import BackgroundParticles from '@/components/BackgroundParticles.vue'
+  import { computed, ref } from 'vue'
+  
+  const orgId = ref(localStorage.getItem('organization_id') || '')
+  const hasOrganization = computed(() => !!String(orgId.value).trim())
+  
+  const orgProfile = computed(() => {
+    try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
+    catch { return null }
+  })
+  const orgName  = computed(() => orgProfile.value?.name)
+  const orgCity  = computed(() => orgProfile.value?.city)
+  const orgEmail = computed(() => orgProfile.value?.contact_email)
+  </script>
+  
+  <style scoped>
+  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+  
+  :root {
+    --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+    --text-primary:#f5f7fa; --text-secondary:#9ca3af;
+    --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+    --danger:#ef4444; --success:#22c55e;
   }
-}
-
-onMounted(async () => {
-  document.title = 'NetSecure-IQ - Dashboard'
-  if (!window.particlesJS) {
-    await new Promise(resolve => {
-      const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
-      s.onload = resolve
-      document.body.appendChild(s)
-    })
+  
+  .dash-page { position:relative; min-height:100vh; }
+  .wrapper { position:relative; z-index:1; display:flex; justify-content:center; padding:28px; }
+  .container { width:100%; max-width:1200px; }
+  .card {
+    background: var(--panel-grey);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 18px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+    padding: 22px;
   }
-  await nextTick()
-  renderParticles()
-})
-</script>
-
-<style scoped>
-#particles-js {
-  position: fixed;
-  width: 100%;
-  height: 100%;
-  top: 0; left: 0;
-  z-index: 0;
-  pointer-events: none; /* ✅ ne bloque jamais les clics */
-}
-.dashboard-page { min-height: 100vh; display: flex; flex-direction: column; }
-.dashboard-wrapper { flex: 1; display:flex; align-items:center; justify-content:center; padding:2rem; position:relative; z-index:1; }
-.dashboard-container { width: 100%; max-width: 1000px; margin: 0 auto; }
-.dashboard-card { background: var(--panel-grey); border-radius: 16px; padding: 2.5rem; border: 1px solid rgba(255,255,255,.05); box-shadow: 0 0 40px rgba(0,194,194,.05); }
-.dashboard-title { text-align:center; margin-bottom:2rem; font-size:2rem; font-weight:600; }
-.dashboard-actions { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:1.5rem; }
-
-.dashboard-button {
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:1.5rem 1rem; min-height:110px; text-decoration:none;
-  background-color: var(--button-bg, #f0f4f8); color: var(--button-text, #2c3e50);
-  border: 1px solid var(--border-color, #e0e6ed); border-radius:12px; font-weight:500; transition:.2s;
-}
-.dashboard-button i { font-size:1.75rem; margin-bottom:.75rem; color: var(--primary-color, #3b82f6); }
-.dashboard-button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.1); background-color: var(--button-hover-bg, #e6edf5); }
-
-.welcome-message { text-align:center; color: var(--text-secondary, #64748b); padding:2rem 0; }
-</style>
+  
+  /* Header */
+  .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+  .title h1 { margin:0; font-size:20px; }
+  .muted { color: var(--text-secondary); font-size:13px; }
+  .status-pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 10px; border-radius:999px;
+    background: rgba(0,194,194,.10); border: 1px solid rgba(0,194,194,.25);
+    font-size: 12px;
+  }
+  .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary-accent); }
+  
+  /* Grid tiles */
+  .grid {
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .tile {
+    display:flex; flex-direction:column; gap:10px;
+    padding:14px; border-radius:14px;
+    background: rgba(31,41,55,.55);
+    border:1px solid rgba(255,255,255,.06);
+    text-decoration:none; color:inherit;
+    transition: transform .2s, box-shadow .2s, background .2s;
+  }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.2); background: rgba(41,53,72,.55); }
+  
+  .tile-head { display:flex; align-items:center; gap:12px; }
+  .icon-wrap {
+    width:38px; height:38px; border-radius:12px; display:grid; place-items:center;
+    background: rgba(0,194,194,.12); border:1px solid rgba(0,194,194,.22);
+    color: var(--primary-accent); flex:none;
+  }
+  .icon-wrap i { font-size:18px; }
+  .labels h3 { margin:0; font-size:15px; }
+  
+  .info { list-style:none; display:grid; gap:6px; padding:0; margin:0; }
+  .info .hint { color: var(--text-secondary); font-size:12px; }
+  .info .val  { font-size:13px; }
+  
+  .cta { margin-top:auto; display:inline-flex; align-items:center; gap:8px; color:var(--primary-accent); font-weight:700; font-size:13px; }
+  .warn { color:#f59e0b; font-weight:700; font-size:13px; }
+  </style>
+  

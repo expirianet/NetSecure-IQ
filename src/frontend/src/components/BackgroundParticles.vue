@@ -27,13 +27,25 @@ function ensurePJSDom() {
 }
 
 function destroyInstance(el) {
-  ensurePJSDom()
-  const entry = window.pJSDom.find(d => d?.pJS?.canvas?.el?.parentElement === el)
+  // On capture la liste AVANT d'appeler destroypJS(), car certaines versions
+  // de particles.js mettent window.pJSDom = null à la destruction.
+  const listBefore = Array.isArray(window.pJSDom) ? window.pJSDom : []
+
+  const entry = listBefore.find(d => d?.pJS?.canvas?.el?.parentElement === el)
   try {
     entry?.pJS?.fn?.vendors?.destroypJS?.()
   } catch {}
-  // Nettoyage du tableau (et des canvases orphelins)
-  window.pJSDom = window.pJSDom.filter(d => d?.pJS?.canvas?.el?.parentElement !== el)
+
+  // Après destroypJS(), window.pJSDom peut être null → on repart d'une base saine.
+  const current = Array.isArray(window.pJSDom) ? window.pJSDom : listBefore
+  try {
+    window.pJSDom = current.filter(d => d?.pJS?.canvas?.el?.parentElement !== el)
+  } catch {
+    // Si "current.filter" plante pour une raison quelconque, on remet un tableau vide.
+    window.pJSDom = []
+  }
+
+  // Nettoyage des canvases orphelins
   el?.querySelectorAll('canvas')?.forEach(c => c.remove())
 }
 
@@ -94,8 +106,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   themeObserver?.disconnect?.()
+  // Sécuriser aussi ici
+  ensurePJSDom()
   destroyInstance(document.getElementById('particles-js'))
-  ensurePJSDom() // ne jamais laisser null
 })
 </script>
 

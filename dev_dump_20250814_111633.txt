@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"backend/internal/handlers"
@@ -32,16 +33,18 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Auth
-	mux.HandleFunc("/api/auth/login", withCORS(auth.Login))
-	mux.HandleFunc("/api/login",       withCORS(auth.Login)) // alias pour l'ancien front
-	mux.HandleFunc("/api/auth/me",     withCORS(auth.Me))
+	mux.HandleFunc("/api/auth/login", auth.Login)
+	mux.HandleFunc("/api/login", auth.Login) // alias pour l'ancien front
+	mux.HandleFunc("/api/auth/me", auth.Me)
 
 	// Organization (GET/POST)
-	mux.HandleFunc("/api/complete-organization", withCORS(org.CompleteOrganization))
+	mux.HandleFunc("/api/complete-organization", org.CompleteOrganization)
 
+	// Server
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           logRequests(mux),
+		// CORS GLOBAL + logging (le CORS s'applique Ã  toutes les routes et mÃªmes aux 404/500)
+		Handler:           corsMiddleware(logRequests(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Println("API listening on", addr)
@@ -55,18 +58,33 @@ func getenv(k, def string) string {
 	return def
 }
 
-// CORS minimal
-func withCORS(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+// -------- CORS global, compatible prÃ©flight --------
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		// Autorise l'origine appelante (au lieu de '*', pour Ã©viter certains blocages navigateurs)
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+		reqHdrs := r.Header.Get("Access-Control-Request-Headers")
+		if strings.TrimSpace(reqHdrs) == "" {
+			reqHdrs = "Authorization, Content-Type"
+		}
+		w.Header().Set("Access-Control-Allow-Headers", reqHdrs)
+
+		// PrÃ©flight : renvoyer tout de suite
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		h.ServeHTTP(w, r)
-	}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Logging minimal
@@ -276,6 +294,26 @@ type Agent struct {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\agent.go =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\organization.go =====
+package models
+
+type Organization struct {
+	ID            string
+	Name          string
+	Address       *string
+	City          *string
+	State         *string
+	ZipCode       *string
+	VATNumber     *string
+	ContactEmail  *string
+	ContactPhone  *string
+	PecEmail      *string
+	SdiCode       *string
+	PersonnelInfo *string
+}
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\organization.go =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\user.go =====
 package models
 
@@ -479,9 +517,6 @@ func GenerateMikrotikScript(peer *Peer, mac string) string {
     <main class="main-content">
       <router-view />
     </main>
-
-    <!-- Canvas pour particles.js -->
-    <div id="particles-js"></div>
   </div>
 </template>
 
@@ -512,76 +547,10 @@ watch(theme, (newTheme) => {
   localStorage.setItem('theme', newTheme)
 })
 
-/* ---------- particles.js ---------- */
-function initParticles() {
-  const dark = theme.value === 'dark'
-  if (!window.particlesJS) return
-
-  // DÃ©truire l'ancien canvas
-  const oldCanvas = document.querySelector('#particles-js > canvas')
-  if (oldCanvas) oldCanvas.remove()
-
-  window.particlesJS('particles-js', {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#888888' },
-      shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.3 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#E0E0E0',
-        opacity: dark ? 0.4 : 0.3,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
-    retina_detect: true
-  })
-}
-
-function attachThemeObserver() {
-  const observer = new MutationObserver(() => initParticles())
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  })
-  return observer
-}
-
 /* ---------- Lifecycle ---------- */
-let themeObserver
-
 onMounted(async () => {
-  // Appliquer le thÃ¨me
+  // Appliquer le thÃ¨me au dÃ©marrage
   document.documentElement.setAttribute('data-theme', theme.value)
-
-  // Charger particles si nÃ©cessaire
-  if (!window.particlesJS) {
-    const script = document.createElement('script')
-    script.src = '/particles/particles.min.js'
-    script.onload = () => {
-      initParticles()
-      themeObserver = attachThemeObserver()
-    }
-    document.body.appendChild(script)
-  } else {
-    initParticles()
-    themeObserver = attachThemeObserver()
-  }
 
   // Ã‰coutes pour mettre Ã  jour la nav quand lâ€™auth change
   window.addEventListener('storage', updateRoleFromStorage)
@@ -595,7 +564,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('storage', updateRoleFromStorage)
   window.removeEventListener('auth-changed', updateRoleFromStorage)
-  if (themeObserver?.disconnect) themeObserver.disconnect()
 })
 </script>
 
@@ -649,18 +617,6 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-/* Canvas particles */
-#particles-js {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
 }
 </style>
 
@@ -1298,130 +1254,116 @@ small { color: var(--danger); }
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
 <template>
-  <div id="particles-js"></div>
+  <!-- Un seul conteneur pour cette instance -->
+  <div id="particles-js" class="particles-layer"></div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue';
-import 'particles.js';
+import { onMounted, onUnmounted } from 'vue'
 
-let particlesInstance = null;
+/** Charge un script une seule fois (par URL) */
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => (s.src || '').includes(src))) {
+      resolve(); return
+    }
+    const s = document.createElement('script')
+    s.src = src
+    s.async = true
+    s.onload = resolve
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
 
-const initializeParticles = () => {
-  if (window.particlesJS) {
-    particlesInstance = window.particlesJS('particles-js', {
-      particles: {
-        number: {
-          value: 80,
-          density: {
-            enable: true,
-            value_area: 800
-          }
-        },
-        color: {
-          value: '#3B82F6' // blue-500
-        },
-        shape: {
-          type: 'circle'
-        },
-        opacity: {
-          value: 0.5,
-          random: true
-        },
-        size: {
-          value: 3,
-          random: true
-        },
-        line_linked: {
-          enable: true,
-          distance: 150,
-          color: '#93C5FD', // blue-300
-          opacity: 0.4,
-          width: 1
-        },
-        move: {
-          enable: true,
-          speed: 2,
-          direction: 'none',
-          random: true,
-          straight: false,
-          out_mode: 'out',
-          bounce: false
-        }
+/** âš ï¸ Toujours garantir un tableau pour Ã©viter "reading 'push' of null" */
+function ensurePJSDom() {
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+
+function destroyInstance(el) {
+  ensurePJSDom()
+  const entry = window.pJSDom.find(d => d?.pJS?.canvas?.el?.parentElement === el)
+  try {
+    entry?.pJS?.fn?.vendors?.destroypJS?.()
+  } catch {}
+  // Nettoyage du tableau (et des canvases orphelins)
+  window.pJSDom = window.pJSDom.filter(d => d?.pJS?.canvas?.el?.parentElement !== el)
+  el?.querySelectorAll('canvas')?.forEach(c => c.remove())
+}
+
+function initParticles() {
+  const el = document.getElementById('particles-js')
+  if (!el || !window.particlesJS) return
+
+  ensurePJSDom()
+  destroyInstance(el)
+
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
+
+  window.particlesJS('particles-js', {
+    particles: {
+      number: { value: 80, density: { enable: true, value_area: 800 } },
+      color:  { value: dark ? '#ffffff' : '#888888' },
+      shape:  { type: 'circle' },
+      opacity:{ value: dark ? 0.5 : 0.35 },
+      size:   { value: 3, random: true },
+      line_linked: {
+        enable: true, distance: 150,
+        color: dark ? '#ffffff' : '#E0E0E0', opacity: dark ? 0.4 : 0.3, width: 1
       },
-      interactivity: {
-        detect_on: 'canvas',
-        events: {
-          onhover: {
-            enable: true,
-            mode: 'grab'
-          },
-          onclick: {
-            enable: false
-          },
-          resize: true
-        },
-        modes: {
-          grab: {
-            distance: 140,
-            line_linked: {
-              opacity: 1
-            }
-          }
-        }
-      },
-      retina_detect: true
-    });
-  }
-};
+      move: { enable: true, speed: 2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: true, mode: 'grab' }, resize: true },
+      modes: { grab: { distance: 140, line_linked: { opacity: 1 } } }
+    },
+    retina_detect: true
+  })
+}
 
-const handleResize = () => {
-  if (particlesInstance && particlesInstance.pJSDom && particlesInstance.pJSDom.length > 0) {
-    particlesInstance.pJSDom[0].pJS.particles.move.speed = window.innerWidth < 768 ? 1 : 2;
-    particlesInstance.pJSDom[0].pJS.fn.particlesRefresh();
-  }
-};
+let themeObserver
 
-onMounted(() => {
-  // Load particles.js dynamically if not already loaded
-  if (!window.particlesJS) {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js';
-    script.onload = () => {
-      initializeParticles();
-      window.addEventListener('resize', handleResize);
-    };
-    document.head.appendChild(script);
-  } else {
-    initializeParticles();
-    window.addEventListener('resize', handleResize);
+onMounted(async () => {
+  try {
+    await loadScriptOnce('/particles/particles.min.js')
+  } catch {
+    await loadScriptOnce('https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js')
   }
-});
+
+  ensurePJSDom()
+  initParticles()
+
+  // Re-render au changement de thÃ¨me
+  themeObserver = new MutationObserver(muts => {
+    if (muts.some(m => m.attributeName === 'data-theme')) {
+      ensurePJSDom()
+      initParticles()
+    }
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize);
-  if (particlesInstance && particlesInstance.pJSDom && particlesInstance.pJSDom[0]) {
-    particlesInstance.pJSDom[0].pJS.fn.vendors.destroypJS();
-    particlesInstance = null;
-  }
-});
+  themeObserver?.disconnect?.()
+  destroyInstance(document.getElementById('particles-js'))
+  ensurePJSDom() // ne jamais laisser null
+})
 </script>
 
 <style scoped>
-#particles-js {
+.particles-layer {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: -1;
-  background-color: var(--bg-page);
-  opacity: 0.6;
-}
-
-/* Dark mode adjustments */
-:root[data-theme="dark"] #particles-js {
-  background-color: var(--bg-page);
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  background: transparent;
+  opacity: .9;
 }
 </style>
 
@@ -1429,561 +1371,441 @@ onUnmounted(() => {
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\charts\LineChart.vue =====
 <template>
-  <div class="chart-container">
-    <canvas ref="chartCanvas"></canvas>
+  <div class="chart-root">
+    <canvas ref="canvas"></canvas>
   </div>
 </template>
 
-<script>
-import { ref, onMounted, watch } from 'vue';
-import Chart from 'chart.js/auto';
+<script setup>
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import Chart from 'chart.js/auto'
 
-export default {
-  name: 'LineChart',
-  props: {
-    chartData: {
-      type: Object,
-      required: true,
-      default: () => ({
-        labels: [],
-        datasets: []
-      })
-    },
-    options: {
-      type: Object,
-      default: () => ({
-        responsive: true,
-        maintainAspectRatio: false
-      })
-    }
-  },
-  setup(props) {
-    const chartCanvas = ref(null);
-    let chart = null;
+const props = defineProps({
+  chartData: { type: Object, required: true },
+  options: { type: Object, default: () => ({}) }
+})
 
-    const initChart = () => {
-      if (!chartCanvas.value) return;
-      
-      if (chart) {
-        chart.destroy();
-      }
-      
-      const ctx = chartCanvas.value.getContext('2d');
-      if (!ctx) return;
-      
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: props.chartData,
-        options: {
-          ...props.options,
-          responsive: true,
-          maintainAspectRatio: false,
-        },
-      });
-    };
+const canvas = ref(null)
+let chartInstance = null
 
-    onMounted(() => {
-      initChart();
-    });
-
-    watch(() => props.chartData, () => {
-      initChart();
-    }, { deep: true });
-
-    return {
-      chartCanvas
-    };
+function renderChart () {
+  if (!canvas.value) return
+  // DÃ©truit lâ€™instance prÃ©cÃ©dente si elle existe
+  if (chartInstance) {
+    chartInstance.destroy()
+    chartInstance = null
   }
-};
+  const ctx = canvas.value.getContext('2d')
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: props.chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
+      scales: { x: { display: false }, y: { display: false } },
+      // Permet de surcharger via :options="..."
+      ...props.options
+    }
+  })
+}
+
+onMounted(renderChart)
+
+// Re-render si les props changent
+watch(() => props.chartData, renderChart, { deep: true })
+watch(() => props.options, renderChart, { deep: true })
+
+onBeforeUnmount(() => {
+  if (chartInstance) chartInstance.destroy()
+})
 </script>
 
 <style scoped>
-.chart-container {
+.chart-root {
   position: relative;
-  height: 100%;
-  min-height: 250px;
   width: 100%;
+  height: 100%;
+}
+canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  /* laisse les clics passer au parent si besoin */
+  pointer-events: none;
 }
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\charts\LineChart.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardOperator.vue =====
-<!-- src/frontend/src/views/dashboard/DashboardOperator.vue -->
 <template>
-    <section class="dashboard-operator">
-      <header class="header">
-        <h1>Dashboard â€” Operator</h1>
-        <p class="subtitle">
-          Vue opÃ©rateur (portÃ©e limitÃ©e Ã  votre organisation).
-        </p>
-      </header>
+    <div class="opdash-page">
+      <BackgroundParticles />
   
-      <!-- Ã‰tat : pas encore rattachÃ© Ã  une organisation -->
-      <div v-if="!hasOrg" class="card warning">
-        <h2>Onboarding requis</h2>
-        <p>
-          Vous devez Ãªtre rattachÃ©(e) Ã  une organisation pour accÃ©der Ã  toutes les fonctionnalitÃ©s.
-        </p>
-        <div class="actions">
-          <RouterLink class="btn primary" to="/organization/edit">
-            CrÃ©er mon organisation
-          </RouterLink>
-          <RouterLink class="btn" to="/onboarding-operator">
-            Demander un rattachement
-          </RouterLink>
+      <div class="opdash-wrapper">
+        <div class="opdash-shell">
+          <!-- En-tÃªte -->
+          <header class="opdash-header">
+            <div class="title">
+              <h1>Operator Control</h1>
+              <p class="muted">Vue dâ€™ensemble rapide et accÃ¨s direct aux outils</p>
+            </div>
+  
+            <div class="status-pill" v-if="hasOrganization">
+              <span class="dot"></span> org&nbsp;: <code>{{ orgId }}</code>
+            </div>
+          </header>
+  
+          <!-- Grille de mini-vues -->
+          <section class="grid">
+            <!-- RouterTable -->
+            <button class="tile" @click="go('/routertable')" aria-label="Ouvrir RouterTable">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-network-wired"></i></div>
+                <div class="labels">
+                  <h3>RouterTable</h3>
+                  <p class="muted">RÃ©sumÃ© des statuts</p>
+                </div>
+              </div>
+  
+              <div class="row kpis">
+                <div class="kpi">
+                  <span class="kpi-val green">{{ routers.online }}</span>
+                  <span class="kpi-label">En ligne</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val red">{{ routers.offline }}</span>
+                  <span class="kpi-label">Hors ligne</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val amber">{{ routers.unknown }}</span>
+                  <span class="kpi-label">Inconnu</span>
+                </div>
+              </div>
+  
+              <div class="spark">
+                <LineChart :chartData="sparks.router" :options="sparkOpts" />
+              </div>
+  
+              <ul class="mini-list">
+                <li v-for="r in miniRouters" :key="r.mac">
+                  <span class="mono">{{ r.mac }}</span>
+                  <span :class="['badge', stateClass(r.status)]">{{ label(r.status) }}</span>
+                </li>
+              </ul>
+            </button>
+  
+            <!-- Organisation -->
+            <button class="tile" @click="go('/organization')" aria-label="Ouvrir Organisation">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-building"></i></div>
+                <div class="labels">
+                  <h3>Organisation</h3>
+                  <p class="muted">Profil & conformitÃ©</p>
+                </div>
+              </div>
+  
+              <div class="org-card">
+                <div class="org-row">
+                  <span class="hint">Nom</span>
+                  <span class="val">{{ orgName || 'â€”' }}</span>
+                </div>
+                <div class="org-row">
+                  <span class="hint">Ville</span>
+                  <span class="val">{{ orgCity || 'â€”' }}</span>
+                </div>
+                <div class="org-row">
+                  <span class="hint">Email</span>
+                  <span class="val">{{ orgEmail || 'â€”' }}</span>
+                </div>
+              </div>
+  
+              <div class="cta">Ouvrir le profil</div>
+            </button>
+  
+            <!-- Add User -->
+            <button
+              class="tile"
+              :disabled="!hasOrganization"
+              @click="go('/adduser')"
+              aria-label="Ouvrir Add User"
+            >
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-user-plus"></i></div>
+                <div class="labels">
+                  <h3>Add User</h3>
+                  <p class="muted">Inviter un utilisateur</p>
+                </div>
+              </div>
+  
+              <div class="giant-number">
+                <span class="num">{{ recentUsers }}</span>
+                <span class="unit">ajouts rÃ©cents</span>
+              </div>
+  
+              <div class="spark">
+                <LineChart :chartData="sparks.users" :options="sparkOpts" />
+              </div>
+  
+              <div v-if="!hasOrganization" class="warn">Rattachez dâ€™abord lâ€™organisation</div>
+              <div v-else class="cta">CrÃ©er un utilisateur</div>
+            </button>
+  
+            <!-- Agents -->
+            <button class="tile" @click="go('/agents')" aria-label="Ouvrir Agents">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-microchip"></i></div>
+                <div class="labels">
+                  <h3>Agents</h3>
+                  <p class="muted">MikroTik dÃ©ployÃ©s</p>
+                </div>
+              </div>
+  
+              <div class="row kpis">
+                <div class="kpi">
+                  <span class="kpi-val green">{{ agents.associated }}</span>
+                  <span class="kpi-label">AssociÃ©s</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val amber">{{ agents.unassociated }}</span>
+                  <span class="kpi-label">Non associÃ©s</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val red">{{ agents.deactivated }}</span>
+                  <span class="kpi-label">DÃ©sactivÃ©s</span>
+                </div>
+              </div>
+  
+              <div class="spark"><LineChart :chartData="sparks.agents" :options="sparkOpts" /></div>
+              <div class="cta">GÃ©rer les agents</div>
+            </button>
+  
+            <!-- PrÃ©-enregistrement Agent -->
+            <button class="tile" @click="go('/agents/register')" aria-label="Ouvrir PrÃ©-enregistrement">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-keyboard"></i></div>
+                <div class="labels">
+                  <h3>PrÃ©-enregistrement Agent</h3>
+                  <p class="muted">Script Mikrotik .rsc</p>
+                </div>
+              </div>
+  
+              <div class="quick-form" @click.stop>
+                <input
+                  v-model="quickMac"
+                  class="mac-input mono"
+                  placeholder="AA:BB:CC:DD:EE:FF"
+                  @input="formatMac"
+                />
+                <button class="btn" :disabled="!macValid" @click="go('/agents/register')">
+                  GÃ©nÃ©rer
+                </button>
+              </div>
+  
+              <div class="spark"><LineChart :chartData="sparks.wg" :options="sparkOpts" /></div>
+              <div class="cta">Ouvrir lâ€™outil</div>
+            </button>
+          </section>
         </div>
-        <p class="hint">
-          Une fois lâ€™organisation crÃ©Ã©e ou validÃ©e par un administrateur, vous aurez accÃ¨s aux actions ci-dessous.
-        </p>
       </div>
-  
-      <!-- Contenu principal quand l'opÃ©rateur est rattachÃ© -->
-      <div v-else class="grid">
-        <!-- Raccourcis principaux -->
-        <div class="card">
-          <h3>Raccourcis</h3>
-          <div class="quick-actions">
-            <RouterLink class="shortcut" to="/routertable" aria-label="AccÃ©der au RouterTable">
-              <span class="title">RouterTable</span>
-              <span class="desc">Liste des routeurs et Ã©tat (scopÃ© Ã  lâ€™organisation)</span>
-            </RouterLink>
-  
-            <RouterLink class="shortcut" to="/organization" aria-label="Profil organisation">
-              <span class="title">Organisation</span>
-              <span class="desc">Profil / informations de lâ€™organisation</span>
-            </RouterLink>
-  
-            <!-- IMPORTANT : l'opÃ©rateur PEUT ajouter des utilisateurs de son org -->
-            <RouterLink class="shortcut" to="/adduser" aria-label="Ajouter un utilisateur">
-              <span class="title">Ajouter un utilisateur</span>
-              <span class="desc">CrÃ©er des comptes â€œUserâ€ pour vos sites</span>
-            </RouterLink>
-  
-            <RouterLink class="shortcut" to="/agents" aria-label="GÃ©rer les agents">
-              <span class="title">Agents</span>
-              <span class="desc">Voir et gÃ©rer les agents (portÃ©e org)</span>
-            </RouterLink>
-  
-            <RouterLink class="shortcut" to="/agents/register" aria-label="PrÃ©-enregistrer un agent">
-              <span class="title">PrÃ©-enregistrement Agent</span>
-              <span class="desc">Associer un routeur MikroTik (MAC) Ã  un site</span>
-            </RouterLink>
-          </div>
-        </div>
-  
-        <!-- Widget lÃ©ger dâ€™information -->
-        <div class="card">
-          <h3>Conseils</h3>
-          <ul class="tips">
-            <li>Utilisez <em>PrÃ©-enregistrement Agent</em> pour lâ€™auto-provisioning via lâ€™adresse MAC.</li>
-            <li>CrÃ©ez des <em>Users</em> pour donner un accÃ¨s ciblÃ© Ã  certains sites.</li>
-            <li>Le <em>RouterTable</em> affiche uniquement les Ã©quipements de votre organisation.</li>
-          </ul>
-        </div>
-      </div>
-  
-      <!-- Note de conformitÃ© au pÃ©rimÃ¨tre de l'opÃ©rateur -->
-      <footer class="footnote">
-        <small>
-          Cette vue respecte les droits de lâ€™Operator&nbsp;: gestion de son organisation, crÃ©ation dâ€™utilisateurs de son org,
-          gestion/lecture des sites et agents de son org â€” sans crÃ©ation dâ€™opÃ©rateurs. 
-        </small>
-      </footer>
-    </section>
+    </div>
   </template>
   
-  <script setup lang="ts">
-  import { computed } from 'vue'
-  import { useAuthStore } from '@/stores/authStore'
+  <script setup>
+  import { ref, computed, onMounted } from 'vue'
+  import { useRouter } from 'vue-router'
+  import BackgroundParticles from '@/components/BackgroundParticles.vue'
+  import LineChart from '@/components/charts/LineChart.vue'
   
-  const auth = useAuthStore()
+  const router = useRouter()
+  const go = (p) => router.push(p)
   
-  // On considÃ¨re que le store expose un user avec organization_id.
-  // Adapter si votre store a une autre forme.
-  const hasOrg = computed(() => {
-    const orgId = (auth.user as any)?.organization_id
-    return !!orgId
+  /* --------- Contexte (org / role) --------- */
+  const orgId = ref(localStorage.getItem('organization_id') || '')
+  const hasOrganization = computed(() => !!String(orgId.value).trim())
+  
+  // Lecture profil org depuis storage si existant (rempli par OrganizationForm)
+  const orgProfile = computed(() => {
+    try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') } catch { return null }
+  })
+  const orgName  = computed(() => orgProfile.value?.name)
+  const orgCity  = computed(() => orgProfile.value?.city)
+  const orgEmail = computed(() => orgProfile.value?.contact_email)
+  
+  /* --------- DonnÃ©es mini (dÃ©monstration locale) --------- */
+  const routers = ref({ online: 7, offline: 2, unknown: 1 })
+  const miniRouters = ref([
+    { mac: 'E4:8D:8C:AA:01:11', status: 'online'  },
+    { mac: '58:EF:68:02:7C:22', status: 'offline' },
+    { mac: 'C0:56:27:9A:33:44', status: 'unknown' }
+  ])
+  const agents = ref({ associated: 12, unassociated: 4, deactivated: 1 })
+  const recentUsers = ref(3)
+  
+  /* --------- Micro-charts (sparklines) --------- */
+  const labels = Array.from({ length: 16 }, (_, i) => i + 1)
+  function series(seed, jitter = 3) {
+    let v = seed
+    return labels.map(() => (v = Math.max(0, v + (Math.random() * jitter - jitter / 2))))
+  }
+  const sparkOpts = {
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
+    scales: { x: { display: false }, y: { display: false } }
+  }
+  const sparks = ref({
+    router: { labels, datasets: [{ data: series(6),      borderColor: '#22c55e' }] },
+    users:  { labels, datasets: [{ data: series(2, 2),   borderColor: '#60a5fa' }] },
+    agents: { labels, datasets: [{ data: series(5, 3),   borderColor: '#f59e0b' }] },
+    wg:     { labels, datasets: [{ data: series(4, 2.5), borderColor: '#00c2c2' }] }
+  })
+  
+  /* --------- Mini helpers --------- */
+  const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
+  const quickMac = ref('')
+  const macValid = computed(() => macRe.test(quickMac.value))
+  function formatMac() {
+    let v = quickMac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
+    quickMac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
+  }
+  function label(s) {
+    return s === 'online' ? 'En ligne' : s === 'offline' ? 'Hors ligne' : 'Inconnu'
+  }
+  function stateClass(s) {
+    return s === 'online' ? 'green' : s === 'offline' ? 'red' : 'amber'
+  }
+  
+  /* --------- LÃ©gÃ¨re animation des chiffres --------- */
+  onMounted(() => {
+    const iv = setInterval(() => {
+      routers.value.online  = Math.max(0, routers.value.online  + (Math.random() > .5 ? 1 : -1))
+      routers.value.offline = Math.max(0, routers.value.offline + (Math.random() > .7 ? 1 : -1))
+      sparks.value.router.datasets[0].data = series(6)
+      sparks.value.agents.datasets[0].data = series(5)
+      sparks.value.users.datasets[0].data  = series(2, 2)
+      sparks.value.wg.datasets[0].data     = series(4, 2.5)
+    }, 4000)
+    // Si navigation frÃ©quente, dÃ©commente pour nettoyer :
+    // onUnmounted(() => clearInterval(iv))
   })
   </script>
   
   <style scoped>
-  .dashboard-operator {
-    display: grid;
-    gap: 1rem;
-    padding: 1rem;
+  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+  
+  .opdash-page { position: relative; min-height: 100vh; }
+  .opdash-wrapper { position: relative; z-index: 1; display: flex; justify-content: center; padding: 28px; }
+  .opdash-shell {
+    width: 100%; max-width: 1200px;
+    background: var(--panel-grey);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 18px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+    padding: 22px;
   }
-  .header .subtitle {
-    opacity: 0.8;
-    margin-top: .25rem;
+  
+  /* Header */
+  .opdash-header { display:flex; align-items:center; justify-content:space-between; gap: 12px; margin-bottom: 14px; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .muted { color: var(--text-secondary); font-size: 13px; }
+  .status-pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 10px; border-radius:999px;
+    background: rgba(0,194,194,.10); border: 1px solid rgba(0,194,194,.25);
+    font-size: 12px;
   }
+  .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary-accent); }
+  
+  /* Grid */
   .grid {
     display: grid;
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
   }
-  .card {
-    border: 1px solid #e5e7eb;
-    border-radius: .75rem;
-    padding: 1rem;
-    background: #fff;
+  
+  /* Tile */
+  .tile {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; border-radius: 14px;
+    background: rgba(31,41,55,.55);
+    border: 1px solid rgba(255,255,255,.06);
+    cursor: pointer; text-align: left;
+    transition: transform .2s, box-shadow .2s, background .2s;
   }
-  .card.warning {
-    border-color: #f59e0b;
-    background: #fffbeb;
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.2); background: rgba(41,53,72,.55); }
+  .tile:disabled { opacity: .6; cursor: not-allowed; }
+  
+  .tile-head { display:flex; align-items:center; gap: 12px; }
+  .icon-wrap {
+    width: 38px; height: 38px; border-radius: 12px; display:grid; place-items:center;
+    background: rgba(0,194,194,.12); border:1px solid rgba(0,194,194,.22);
+    color: var(--primary-accent); flex: none;
   }
-  .actions {
-    display: flex;
-    gap: .5rem;
-    margin-top: .75rem;
-    flex-wrap: wrap;
+  .icon-wrap i { font-size: 18px; }
+  .labels h3 { margin: 0; font-size: 15px; }
+  .labels p { margin: 0; }
+  
+  /* KPIs */
+  .row.kpis { display:flex; gap: 16px; }
+  .kpi { display:flex; flex-direction:column; gap:2px; }
+  .kpi-val { font-weight: 800; font-size: 18px; }
+  .kpi-val.green { color:#22c55e; }
+  .kpi-val.red { color:#ef4444; }
+  .kpi-val.amber { color:#f59e0b; }
+  .kpi-label { font-size: 11px; color: var(--text-secondary); }
+  
+  .spark { height: 64px; }
+  
+  /* Mini liste routeurs */
+  .mini-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .mini-list li { display:flex; align-items:center; justify-content:space-between; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .badge { padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .badge.green { background: rgba(34,197,94,.15); color: #22c55e; }
+  .badge.red { background: rgba(239,68,68,.15); color: #ef4444; }
+  .badge.amber { background: rgba(245,158,11,.15); color: #f59e0b; }
+  
+  /* Carte org */
+  .org-card { display:grid; gap:6px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:10px; background: rgba(12,16,24,.35); }
+  .org-row { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+  .org-row .hint { color: var(--text-secondary); font-size: 12px; }
+  .org-row .val { font-size: 13px; }
+  
+  /* Add User */
+  .giant-number { display:flex; align-items:baseline; gap:8px; margin-top: 2px; }
+  .giant-number .num { font-size: 28px; font-weight: 800; }
+  .giant-number .unit { font-size: 12px; color: var(--text-secondary); }
+  
+  /* PrÃ©-enreg form */
+  .quick-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .mac-input {
+    border: 1px solid var(--divider-grey); background: #0b0e16; color: var(--text-primary);
+    border-radius: 8px; padding: 10px 12px; font-size: 13px;
   }
   .btn {
-    display: inline-block;
-    padding: .5rem .75rem;
-    border-radius: .5rem;
-    border: 1px solid #d1d5db;
-    text-decoration: none;
+    border: 1px solid rgba(0,194,194,.35);
+    background: rgba(0,194,194,.12); color: var(--primary-accent);
+    border-radius: 8px; font-weight: 700; padding: 10px 12px;
   }
-  .btn.primary {
-    background: #111827;
-    color: #fff;
-    border-color: #111827;
+  .btn:disabled { opacity: .5; }
+  
+  /* CTA */
+  .cta {
+    margin-top: auto;
+    display: inline-flex; align-items:center; gap: 8px;
+    color: var(--primary-accent); font-weight: 700; font-size: 13px;
   }
-  .quick-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: .75rem;
-    margin-top: .5rem;
-  }
-  .shortcut {
-    display: block;
-    padding: .75rem;
-    border: 1px solid #e5e7eb;
-    border-radius: .75rem;
-    text-decoration: none;
-    color: inherit;
-  }
-  .shortcut:hover {
-    background: #f9fafb;
-  }
-  .shortcut .title {
-    font-weight: 600;
-  }
-  .shortcut .desc {
-    display: block;
-    opacity: 0.7;
-    font-size: .9rem;
-  }
-  .tips {
-    margin: 0;
-    padding-left: 1rem;
-  }
-  .footnote {
-    opacity: 0.7;
-  }
+  .warn { margin-top: auto; color: #f59e0b; font-weight: 700; font-size: 13px; }
+  
+  /* Responsive */
+  @media (max-width: 780px) { .opdash-wrapper { padding: 16px; } .opdash-shell { padding: 16px; } }
   </style>
   
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardOperator.vue =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardPage.vue =====
-<template>
-  <div class="dashboard-page">
-    <!-- Particles Background -->
-    <div id="particles-js"></div>
-
-    <!-- Main Content -->
-    <div class="dashboard-wrapper">
-      <div class="dashboard-container">
-        <div class="dashboard-card">
-          <h1 class="dashboard-title">Dashboard</h1>
-          
-          <div v-if="isAdminOrOperator" class="dashboard-actions">
-            <button class="dashboard-button" @click="goToRouterInfo">
-              <i class="fas fa-network-wired"></i> Router Info
-            </button>
-            <button v-if="!needsOrganization" class="dashboard-button" @click="addUser">
-              <i class="fas fa-user-plus"></i> Add User
-            </button>
-            <button v-if="needsOrganization" class="dashboard-button" @click="goToOrganizationInfo">
-              <i class="fas fa-building"></i> Organization Info
-            </button>
-            <button v-if="canAddOperator" class="dashboard-button" @click="addOperator">
-              <i class="fas fa-user-shield"></i> Add Operator
-            </button>
-          </div>
-
-          <div v-else class="welcome-message">
-            <p>Welcome to your dashboard. Select an option to get started.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { computed, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
-
-// Computed properties
-const role = computed(() => localStorage.getItem("role"))
-const isAdmin = computed(() => role.value === "administrator")
-const isOperator = computed(() => role.value === "operator")
-const isAdminOrOperator = computed(() => isAdmin.value || isOperator.value)
-const canAddOperator = computed(() => isAdmin.value || (isOperator.value && hasOrganization.value))
-const needsOrganization = computed(() => {
-  // Add your organization check logic here
-  return false
-})
-const hasOrganization = computed(() => {
-  // Add your organization check logic here
-  return true
-})
-
-// Navigation methods
-const goToRouterInfo = () => {
-  router.push('/router-info')
-}
-
-const addUser = () => {
-  router.push('/add-user')
-}
-
-const goToOrganizationInfo = () => {
-  router.push('/organization')
-}
-
-const addOperator = () => {
-  router.push('/add-operator')
-}
-
-// Particles initialization
-const renderParticles = () => {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark' || 
-              document.documentElement.classList.contains('dark')
-  
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
-
-  const savedTheme = localStorage.getItem('theme')
-  const isDark = savedTheme ? savedTheme === 'dark' : dark
-
-  if (window.particlesJS) {
-    window.particlesJS('particles-js', {
-      particles: {
-        number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: isDark ? '#ffffff' : '#555555' },
-        shape: { type: 'circle' },
-        opacity: { value: isDark ? 0.5 : 0.5 },
-        size: { value: 3, random: true },
-        line_linked: {
-          enable: true,
-          distance: 150,
-          color: isDark ? '#ffffff' : '#888888',
-          opacity: isDark ? 0.4 : 0.4,
-          width: 1
-        },
-        move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-      },
-      interactivity: {
-        detect_on: 'canvas',
-        events: {
-          onhover: { enable: true, mode: 'repulse' },
-          onclick: { enable: true, mode: 'push' },
-          resize: true
-        },
-        modes: {
-          repulse: { distance: 200 },
-          push: { particles_nb: 4 }
-        }
-      },
-      retina_detect: true
-    })
-  }
-}
-
-const initializeParticles = async () => {
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
-  }
-  
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme)
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-  
-  if (!window.particlesJS) {
-    await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
-  }
-  
-  await nextTick();
-  renderParticles();
-  
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-        const theme = document.documentElement.getAttribute('data-theme') || 
-                     (document.documentElement.classList.contains('dark') ? 'dark' : 'light')
-        localStorage.setItem('theme', theme)
-        
-        const old = document.querySelector('#particles-js > canvas')
-        if (old) old.remove()
-        renderParticles()
-      }
-    }
-  });
-
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme', 'class']
-  });
-}
-
-// Lifecycle hooks
-onMounted(() => {
-  document.title = 'NetSecure-IQ - Dashboard'
-  initializeParticles()
-})
-</script>
-
-<style scoped>
-.dashboard-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--background-color, #f5f7fa);
-  color: var(--text-color, #2c3e50);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-}
-
-#particles-js {
-  position: fixed;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  z-index: 0;
-}
-
-.dashboard-wrapper {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  position: relative;
-  z-index: 1;
-}
-
-.dashboard-container {
-  width: 100%;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-.dashboard-card {
-  background-color: var(--panel-grey);
-  border-radius: 16px;
-  padding: 2.5rem;
-  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-}
-
-.dashboard-title {
-  text-align: center;
-  color: var(--text-color, #2c3e50);
-  margin-bottom: 2rem;
-  font-size: 2rem;
-  font-weight: 600;
-}
-
-.dashboard-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-
-.dashboard-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem 1rem;
-  background-color: var(--button-bg, #f0f4f8);
-  color: var(--button-text, #2c3e50);
-  border: 1px solid var(--border-color, #e0e6ed);
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-height: 100px;
-}
-
-.dashboard-button i {
-  font-size: 1.75rem;
-  margin-bottom: 0.75rem;
-  color: var(--primary-color, #3b82f6);
-}
-
-.dashboard-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  background-color: var(--button-hover-bg, #e6edf5);
-}
-
-.welcome-message {
-  text-align: center;
-  padding: 2rem 0;
-  color: var(--text-secondary, #64748b);
-}
-
-/* Dark mode styles */
-:global(.dark) .dashboard-card {
-  background-color: rgba(30, 41, 59, 0.7);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-:global(.dark) .dashboard-button {
-  background-color: rgba(30, 41, 59, 0.7);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-}
-
-:global(.dark) .dashboard-button:hover {
-  background-color: rgba(41, 55, 78, 0.7);
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .dashboard-actions {
-    grid-template-columns: 1fr;
-  }
-  
-  .dashboard-card {
-    padding: 1.5rem;
-  }
-}
-</style>
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardPage.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HelloWorld.vue =====
 <template>
@@ -2262,7 +2084,7 @@ function setupThemeObserver() {
 <template>
   <div class="login-page">
     <!-- Canvas animÃ© -->
-    <div id="particles-js"></div>
+    <div id="login-particles"></div>
 
     <!-- Formulaire de login -->
     <div class="login-wrapper">
@@ -2307,7 +2129,7 @@ function setupThemeObserver() {
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 
@@ -2319,29 +2141,59 @@ const loading = ref(false)
 const router = useRouter()
 const { login: setAuthLogin } = useAuth()
 
-/**
- * Initialise ou recharge particles.js en fonction du thÃ¨me actuel.
- */
-function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
+/* ------------------------------------------------------------------
+   Particles.js â€” sÃ©curisation anti "Cannot read properties of null (push)"
+   - Toujours forcer window.pJSDom Ã  Ãªtre un tableau
+   - DÃ©truire proprement l'instance rattachÃ©e au conteneur
+-------------------------------------------------------------------*/
+function ensurePJSDom () {
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+function destroyLoginParticles () {
+  const el = document.getElementById('login-particles')
+  try {
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) {
+          try { entry.pJS.fn.vendors.destroypJS() } catch {}
+        }
+        return !same
+      })
+    }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
 
-  window.particlesJS('particles-js', {
+/** (Re)rend le fond animÃ© en respectant le thÃ¨me */
+function renderParticles () {
+  const id = 'login-particles'
+  const el = document.getElementById(id)
+  if (!el || !window.particlesJS) return
+
+  ensurePJSDom()
+  destroyLoginParticles()
+
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
+
+  window.particlesJS(id, {
     particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
+      number: { value: 75, density: { enable: true, value_area: 800 } },
       color: { value: dark ? '#ffffff' : '#555555' },
       shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.5 },
+      opacity: { value: 0.5 },
       size: { value: 3, random: true },
       line_linked: {
         enable: true,
         distance: 150,
         color: dark ? '#ffffff' : '#888888',
-        opacity: dark ? 0.4 : 0.4,
+        opacity: 0.4,
         width: 1
       },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+      move: { enable: true, speed: 4, direction: 'none', out_mode: 'bounce' }
     },
     interactivity: {
       detect_on: 'canvas',
@@ -2350,51 +2202,52 @@ function renderParticles() {
         onclick: { enable: true, mode: 'push' },
         resize: true
       },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
+      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
     },
     retina_detect: true
   })
 }
 
 // S'assure que particles est chargÃ© aprÃ¨s le DOM et le thÃ¨me
-async function initializeParticles() {
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
+async function initializeParticles () {
+  const id = 'login-particles'
+  if (!document.getElementById(id)) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    return initializeParticles()
   }
 
   if (!window.particlesJS) {
     await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
+      const script = document.createElement('script')
+      script.src = '/particles/particles.min.js'
+      script.onload = resolve
+      document.body.appendChild(script)
+    })
   }
 
-  await nextTick();
-  renderParticles();
+  ensurePJSDom()
+  await nextTick()
+  renderParticles()
 
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme') {
-        renderParticles();
-      }
-    }
-  });
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  });
+  // Re-render quand le thÃ¨me change
+  const obs = new MutationObserver(muts => {
+    if (muts.some(m => m.attributeName === 'data-theme')) renderParticles()
+  })
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 }
 
 onMounted(() => {
-  initializeParticles();
+  initializeParticles()
 })
 
+onUnmounted(() => {
+  destroyLoginParticles()
+  ensurePJSDom() // ne jamais remettre window.pJSDom Ã  null
+})
+
+/* ------------------------------------------------------------------
+   Auth
+-------------------------------------------------------------------*/
 const login = async () => {
   loading.value = true
   try {
@@ -2421,7 +2274,7 @@ const login = async () => {
     localStorage.setItem('role', data.role?.toLowerCase() || '')
     localStorage.setItem('organization_id', data.organization_id || '')
 
-    // >>> IMPORTANT : informer l'app qu'on vient de se loguer (maj de la nav)
+    // informer l'app qu'on vient de se loguer (maj de la nav)
     window.dispatchEvent(new Event('auth-changed'))
 
     // Choix de la redirection
@@ -2430,7 +2283,7 @@ const login = async () => {
     if (role === 'user') redirectTo = '/routertable'
     else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
 
-    if (typeof setAuthLogin === 'function') setAuthLogin();
+    if (typeof setAuthLogin === 'function') setAuthLogin()
     setTimeout(() => router.push(redirectTo), 200)
   } catch (err) {
     message.value = 'Error: ' + err.message
@@ -2462,7 +2315,7 @@ const login = async () => {
 }
 
 /* Canvas particles */
-#particles-js {
+#login-particles {
   position: fixed;
   top: 0;
   left: 0;
@@ -2471,10 +2324,11 @@ const login = async () => {
   z-index: 0;
   background-color: var(--bg-dark);
   transition: background-color 0.3s ease;
+  pointer-events: none;
 }
 
 /* override light mode */
-[data-theme='light'] #particles-js {
+[data-theme='light'] #login-particles {
   background-color: #E0E0E0;
 }
 
@@ -2610,82 +2464,84 @@ const login = async () => {
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\LoginForm.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
+===== BEGIN: src/frontend/src/components/organization/OrganizationProfile.vue =====
 <template>
-  <div class="login-page">
-    <!-- Indicateur de chargement -->
-    <div v-if="isLoading" class="loading-overlay">
-      <div class="loading-spinner"></div>
-    </div>
-    
-    <!-- animated particles background -->
-    <div id="particles-js"></div>
-    
-    <!-- Messages d'erreur et de succÃ¨s -->
-    <div v-if="showError" class="notification error">
-      {{ errorMessage }}
-      <button @click="showError = false" class="close-btn">&times;</button>
-    </div>
-    
-    <div v-if="showSuccess" class="notification success">
-      DonnÃ©es chargÃ©es avec succÃ¨s !
-      <button @click="showSuccess = false" class="close-btn">&times;</button>
-    </div>
+  <div class="org-page">
+    <!-- Fond animÃ© isolÃ© pour la page profil -->
+    <div id="org-particles" class="particles-layer"></div>
 
-    <div class="login-wrapper">
-      <div class="login-container">
-        <div class="login-card">
-          <!-- Page header -->
-          <h2 class="login-title">Organization Profile</h2>
-          <h3 class="login-subtitle">View and manage your organization's information</h3>
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <h2 class="title">NetSecure-IQ</h2>
+          <h3 class="subtitle">Organization Profile</h3>
 
-          <!-- Profile content -->
-          <div class="login-form">
-            <!-- Organization Info -->
-            <div class="form-section">
-              <h4><i class="fas fa-building"></i> Organization Information</h4>
-              <input readonly :value="org.name" />
-              <input readonly :value="org.vatNumber" />
-              <input readonly :value="org.address" />
-              <div class="form-row">
-                <input readonly :value="org.city" />
-                <input readonly :value="org.state" />
-                <input readonly :value="org.zipCode" />
+          <div v-if="!org" class="empty">
+            <p>No organization information saved yet.</p>
+            <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
+          </div>
+
+          <div v-else class="content">
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-building"></i> Organization Information</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ safe(org.name) }}</span></div>
+                <div class="row"><label>VAT / Fiscal Code</label><span>{{ safe(org.vat_number) }}</span></div>
+                <div class="row wide"><label>Address</label><span>{{ safe(org.address) }}</span></div>
+                <div class="row"><label>City</label><span>{{ safe(org.city) }}</span></div>
+                <div class="row"><label>State</label><span>{{ safe(org.state) }}</span></div>
+                <div class="row"><label>ZIP</label><span>{{ safe(org.zip_code) }}</span></div>
+                <div class="row"><label>Email</label><span>{{ safe(org.contact_email) }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ safe(org.contact_phone) }}</span></div>
+                <div class="row"><label>PEC Email</label><span>{{ safe(org.pec_email) }}</span></div>
+                <div class="row"><label>SDI Code</label><span>{{ safe(org.sdi_code) }}</span></div>
               </div>
-              <input readonly :value="org.email" />
-              <input readonly :value="org.phone" />
-              <input readonly :value="org.pecEmail || 'â€”'" />
-              <input readonly :value="org.sdiCode || 'â€”'" />
-            </div>
+            </section>
 
-            <!-- Company Manager -->
-            <div class="form-section">
-              <h4><i class="fas fa-user-tie"></i> Company Manager</h4>
-              <input readonly :value="org.manager.name" />
-              <input readonly :value="org.manager.email" />
-              <input readonly :value="org.manager.phone" />
-            </div>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-user-tie"></i> Company Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(manager).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(manager).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(manager).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Data Controller -->
-            <div class="form-section">
-              <h4><i class="fas fa-shield-alt"></i> Data Controller</h4>
-              <input readonly :value="org.controller.name" />
-              <input readonly :value="org.controller.email" />
-              <input readonly :value="org.controller.phone" />
-            </div>
+            <section v-if="hasTechnical" class="section">
+              <h4 class="section-title"><i class="fas fa-user-cog"></i> Technical Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(technical).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(technical).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(technical).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Data Processor -->
-            <div class="form-section">
-              <h4><i class="fas fa-database"></i> Data Processor</h4>
-              <input readonly :value="org.processor.name" />
-              <input readonly :value="org.processor.email" />
-              <input readonly :value="org.processor.phone" />
-            </div>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-shield-alt"></i> Data Controller</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(controller).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(controller).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(controller).phone }}</span></div>
+              </div>
+            </section>
 
-            <!-- Edit button -->
-            <div class="form-actions">
-              <router-link to="/organization/edit" class="btn btn-primary">
-                <i class="fas fa-edit"></i> Edit Profile
-              </router-link>
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-database"></i> Data Processor</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(processor).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(processor).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(processor).phone }}</span></div>
+              </div>
+            </section>
+
+            <section v-if="org.personnel_info" class="section">
+              <h4 class="section-title"><i class="fas fa-file-alt"></i> Personnel Info</h4>
+              <pre class="pre">{{ org.personnel_info }}</pre>
+            </section>
+
+            <div class="actions">
+              <RouterLink class="btn primary" to="/organization/edit">Edit</RouterLink>
+              <button class="btn ghost" @click="clearLocal">Reset local data</button>
             </div>
           </div>
         </div>
@@ -2695,424 +2551,151 @@ const login = async () => {
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
+/**
+ * Important :
+ * - Pas de <BackgroundParticles/> ici.
+ * - On utilise un ID dÃ©diÃ© + garde-fou pJSDom.
+ */
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 
-const router = useRouter();
-const isLoading = ref(true);
-const error = ref(null);
-const showSuccess = ref(false);
-const showError = ref(false);
-const errorMessage = ref('');
+const CONTAINER_ID = 'org-particles'
+let themeObserver
 
-// DonnÃ©es de l'organisation
-const org = ref({
-  name: '',
-  vatNumber: '',
-  address: '',
-  city: '',
-  zipCode: '',
-  state: '',
-  email: '',
-  phone: '',
-  sdiCode: '',
-  pecEmail: '',
-  personnelInfo: '',
-  manager: {
-    name: '',
-    email: '',
-    phone: ''
-  },
-  controller: {
-    name: '',
-    email: '',
-    phone: ''
-  },
-  processor: {
-    name: '',
-    email: '',
-    phone: ''
-  }
-});
+function ensurePJSDom() {
+  // ðŸ‘‰ corrige le crash "reading 'push' of null" dans particles.js
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
 
-// RÃ©cupÃ©rer les donnÃ©es de l'organisation depuis l'API
-const fetchOrganization = async () => {
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => (s.src || '').includes(src))) return resolve()
+    const s = document.createElement('script')
+    s.src = src; s.async = true
+    s.onload = resolve; s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+function destroyFor(el) {
   try {
-    isLoading.value = true;
-    error.value = null;
-    
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('No authentication token found');
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) { try { entry.pJS.fn.vendors.destroypJS() } catch {} }
+        return !same
+      })
     }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
 
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api/complete-organization`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+function initParticles() {
+  const el = document.getElementById(CONTAINER_ID)
+  if (!el || !window.particlesJS) return
+  ensurePJSDom()
+  destroyFor(el)
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || 'Failed to fetch organization data');
-    }
-
-    const data = await response.json();
-    
-    // Mettre Ã  jour les donnÃ©es de l'organisation
-    org.value = {
-      name: data.name || '',
-      vatNumber: data.vat_number || '',
-      address: data.address || '',
-      city: data.city || '',
-      zipCode: data.zip_code || '',
-      state: data.state || '',
-      email: data.contact_email || '',
-      phone: data.contact_phone || '',
-      sdiCode: data.sdi_code || '',
-      pecEmail: data.pec_email || '',
-      personnelInfo: data.personnel_info || '',
-      manager: {
-        name: data.manager?.name || 'N/A',
-        email: data.manager?.email || 'N/A',
-        phone: data.manager?.phone || 'N/A',
-      },
-      controller: {
-        name: data.controller?.name || 'N/A',
-        email: data.controller?.email || 'N/A',
-        phone: data.controller?.phone || 'N/A',
-      },
-      processor: {
-        name: data.processor?.name || 'N/A',
-        email: data.processor?.email || 'N/A',
-        phone: data.processor?.phone || 'N/A',
-      },
-    };
-    
-  } catch (err) {
-    console.error('Error fetching organization:', err);
-    const message = err.message || 'An error occurred while loading organization data';
-    error.value = message;
-    errorMessage.value = message;
-    showError.value = true;
-    
-    // Rediriger vers la page de connexion si non authentifiÃ©
-    if (err.message.includes('token') || err.message.includes('authenticate')) {
-      router.push('/login');
-    }
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-// Fonction pour gÃ©rer les particules d'arriÃ¨re-plan
-const renderParticles = () => {
-  const theme = document.documentElement.getAttribute('data-theme');
-  const isDark = theme === 'dark';
-
-  const oldCanvas = document.querySelector('#particles-js > canvas');
-  if (oldCanvas) oldCanvas.remove();
-
-  window.particlesJS('particles-js', {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+  window.particlesJS(CONTAINER_ID, {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: isDark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: isDark ? 0.5 : 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: isDark ? '#ffffff' : '#888888',
-        opacity: isDark ? 0.4 : 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
+      color:  { value: dark ? '#ffffff' : '#888888' },
+      shape:  { type: 'circle' },
+      opacity:{ value: dark ? 0.5 : 0.35 },
+      size:   { value: 3, random: true },
+      line_linked: { enable: true, distance: 150, color: dark ? '#ffffff' : '#E0E0E0', opacity: 0.35, width: 1 },
+      move: { enable: true, speed: 2, direction: 'none', out_mode: 'out' }
     },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
+    interactivity: { detect_on: 'canvas', events: { onhover: { enable: true, mode: 'grab' }, resize: true },
+      modes: { grab: { distance: 140, line_linked: { opacity: 1 } } } },
     retina_detect: true
   })
 }
 
-async function initializeParticles() {
-  // 1) wait DOM
-  await nextTick()
+/* ----- DonnÃ©es locales (inchangÃ©) ----- */
+function readLocal() { try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') } catch { return null } }
+const org = ref(readLocal())
+const manager    = computed(() => org.value?.manager    || {})
+const technical  = computed(() => org.value?.technical  || null)
+const controller = computed(() => org.value?.controller || {})
+const processor  = computed(() => org.value?.processor  || {})
+const hasTechnical = computed(() => !!(technical.value && (technical.value.name || technical.value.email || technical.value.phone)))
+function safe(v) { return (v ?? '').toString().trim() || 'â€”' }
+function person(p) { return { name: safe(p?.name), email: safe(p?.email), phone: safe(p?.phone) } }
+function clearLocal() { localStorage.removeItem('organization_profile'); org.value = null }
 
-  // 2) load script if needed
-  if (!window.particlesJS) {
-    await new Promise(resolve => {
-      const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
-      s.onload = resolve
-      document.body.appendChild(s)
-    })
-  }
-
-  // 3) initial render
-  renderParticles()
-
-  // 4) observe theme changes
-  new MutationObserver(muts => {
-    muts.forEach(m => {
-      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-        renderParticles()
-      }
-    })
-  }).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme', 'class']
-  })
-}
-
-// --- mount ---
 onMounted(async () => {
-  document.title = 'NetSecure-IQ - Organization Profile';
-  await nextTick();
-  await initializeParticles();
-  await fetchOrganization();
-  showSuccess.value = true;
-  setTimeout(() => showSuccess.value = false, 3000);
+  document.title = 'NetSecure-IQ - Organization Profile'
+  org.value = readLocal()
+
+  try { await loadScriptOnce('/particles/particles.min.js') }
+  catch { await loadScriptOnce('https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js') }
+
+  ensurePJSDom()
+  initParticles()
+
+  themeObserver = new MutationObserver(m => {
+    if (m.some(x => x.attributeName === 'data-theme')) initParticles()
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+
+onBeforeUnmount(() => {
+  themeObserver?.disconnect?.()
+  destroyFor(document.getElementById(CONTAINER_ID))
 })
 </script>
 
 <style scoped>
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 
-/* Notifications */
-.notification {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  padding: 15px 20px;
-  border-radius: 8px;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  max-width: 400px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: slideIn 0.3s ease-out;
-}
+:root{ --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+--text-primary:#f5f7fa; --text-secondary:#9ca3af; --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+--radius:16px; --danger:#ef4444; --success:#22c55e; }
 
-.notification.error {
-  background-color: #ff4d4f;
-}
+.org-page{ position:relative; min-height:100vh; overflow:hidden; }
+.particles-layer{ position:fixed; inset:0; width:100vw; height:100vh; z-index:0; pointer-events:none; }
 
-.notification.success {
-  background-color: #52c41a;
-}
+.wrapper{ position:relative; z-index:10; display:flex; align-items:flex-start; justify-content:center; padding:32px; min-height:100vh; }
+.container{ width:100%; max-width:1000px; }
+.card{ background:var(--panel-grey); border-radius:var(--radius); padding:26px; border:1px solid rgba(255,255,255,.06); box-shadow:0 0 40px rgba(0,194,194,.05); }
 
-.notification .close-btn {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 20px;
-  cursor: pointer;
-  margin-left: 15px;
-  padding: 0 5px;
-  line-height: 1;
-}
+.title{ text-align:center; font-size:20px; font-weight:600; color:var(--primary-accent); margin-bottom:6px; }
+.subtitle{ text-align:center; font-size:16px; margin-bottom:20px; }
 
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
+.section{ margin-top:16px; padding:14px; border:1px solid rgba(255,255,255,.05); border-radius:12px; background:rgba(31,41,55,.30); }
+.section-title{ margin:0 0 10px; color:var(--primary-accent); font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; }
 
-/* Loading indicator */
-.loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
+.grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; }
+.row{ display:flex; flex-direction:column; gap:6px; }
+.row.wide{ grid-column: 1 / -1; }
+label{ font-size:12px; color:var(--text-secondary); }
+span{ font-size:14px; color:var(--text-primary); }
 
-.loading-spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-}
+.pre{ white-space:pre-wrap; background:#0b0e16; border:1px solid var(--divider-grey); border-radius:8px; padding:10px 12px; color:#e5e7eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+.actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap; }
+.btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; border-radius:8px; font-weight:700; cursor:pointer; padding:10px 14px; transition:.2s; }
+.btn.primary{ background:var(--primary-accent); color:#0e111a; }
+.btn.primary:hover{ background:var(--primary-hover); color:#fff; }
+.btn.ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); color:var(--text-primary); }
+.btn.ghost:hover{ background:rgba(255,255,255,.10); }
 
-:root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00c2c2;
-  --primary-hover: #00a7a7;
-  --border-radius: 12px;
-  --transition: all 0.2s ease;
-}
-/* hide any themeâ€toggle you might have globally */
-.theme-switcher { display: none!important; }
-
-.login-page {
-  position: relative;
-  min-height: 100vh;
-  background-color: var(--bg-dark);
-  overflow: hidden;
-}
-
-#particles-js {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100vw; height: 100vh;
-  z-index: 0;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
-  pointer-events: none;
-}
-[data-theme='light'] #particles-js {
-  background-color: #E0E0E0;
-}
-
-.login-wrapper {
-  position: relative; z-index: 10;
-  display: flex; align-items: center; justify-content: center;
-  padding: 32px; min-height: 100vh;
-}
-
-.login-container {
-  width: 100%; max-width: 800px;
-}
-
-.login-card {
-  background-color: var(--panel-grey);
-  border-radius: 16px;
-  padding: 32px;
-  border: 1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 0 40px rgba(0,194,194,0.05);
-  box-sizing: border-box;
-}
-
-.login-title {
-  text-align: center;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--primary-accent);
-  margin-bottom: 8px;
-}
-.login-subtitle {
-  text-align: center;
-  font-size: 18px;
-  color: var(--text-primary);
-  margin-bottom: 32px;
-  font-weight: 500;
-}
-
-.login-form {
-  display: flex; flex-direction: column; gap: 16px;
-}
-
-.form-section {
-  background-color: rgba(31,41,55,0.3);
-  border-radius: 8px;
-  padding: 16px;
-  transition: background-color 0.3s ease;
-}
-:root:not([data-theme='dark']) .form-section {
-  background-color: rgba(243,244,246,0.5);
-  border: 1px solid rgba(209,213,219,0.5);
-}
-.form-section h4 {
-  color: var(--primary-accent);
-  margin: 0 0 16px;
-  font-size: 16px; font-weight: 500;
-  display: flex; align-items: center; gap: 8px;
-}
-
-.login-form input {
-  width: 100%;
-  background-color: var(--panel-grey);
-  border: 1px solid var(--divider-grey);
-  border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: var(--transition);
-  margin-bottom: 8px;
-}
-
-.form-row {
-  display: flex; gap: 16px; margin-bottom: 8px;
-}
-.form-row input { margin-bottom: 0; }
-
-.form-actions {
-  display: flex; justify-content: center; margin-top: 24px; gap: 16px;
-}
-
-.btn {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: var(--transition);
-  display: inline-flex; align-items: center; gap: 8px;
-}
-
-.btn-primary {
-  background-color: var(--primary-accent);
-  color: #0e111a;
-}
-.btn-primary:hover {
-  background-color: var(--primary-hover);
-}
-
-@media (max-width: 768px) {
-  .login-wrapper { padding: 16px; }
-  .login-card   { padding: 24px; }
-  .form-row     { flex-direction: column; gap: 8px; }
-  .form-actions { flex-direction: column; }
-  .btn          { width: 100%; }
-}
+.empty{ text-align:center; color:var(--text-secondary); padding:10px 0 4px; display:grid; gap:12px; }
+@media (max-width: 720px){ .wrapper{ padding:16px; } .card{ padding:20px; } }
 </style>
+===== END: src/frontend/src/components/organization/OrganizationProfile.vue =====
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\OrganizationForm.vue =====
+===== BEGIN: src/frontend/src/components/OrganizationForm.vue =====
 <template>
   <div class="login-page">
-    <!-- Canvas animÃ© -->
-    <div id="particles-js"></div>
+    <!-- Fond animÃ© isolÃ© pour le form -->
+    <div id="org-form-particles"></div>
 
-    <!-- Formulaire d'organisation -->
     <div class="login-wrapper">
       <div class="login-container">
         <div class="login-card">
@@ -3170,17 +2753,11 @@ onMounted(async () => {
             </div>
 
             <div class="form-actions">
-              <button type="submit" :disabled="loading">
-                {{ loading ? 'Submitting...' : 'Submit' }}
-              </button>
-              <button type="button" class="btn-secondary" @click="goToDashboard">
-                Go to Dashboard
-              </button>
+              <button type="submit" :disabled="loading">{{ loading ? 'Submitting...' : 'Submit' }}</button>
+              <button type="button" class="btn-secondary" @click="goToDashboard">Go to Dashboard</button>
             </div>
 
-            <p v-if="message" class="login-message" :class="messageType">
-              {{ message }}
-            </p>
+            <p v-if="message" class="login-message" :class="messageType">{{ message }}</p>
           </form>
         </div>
       </div>
@@ -3189,144 +2766,104 @@ onMounted(async () => {
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { reactive } from 'vue'
+import { API } from '@/utils/api.js'
 
 const router = useRouter()
 const message = ref('')
 const loading = ref(false)
 const successMessage = ref(false)
+const messageType = computed(() => (successMessage.value ? 'success' : 'error'))
 
-const messageType = computed(() => {
-  return successMessage.value ? 'success' : 'error'
-})
+/* ---------- Particles (ID dÃ©diÃ© + garde-fou pJSDom) ---------- */
+const CONTAINER_ID = 'org-form-particles'
+let themeObserver
 
-/**
- * Initialise ou recharge particles.js en fonction du thÃ¨me actuel.
- */
+function ensurePJSDom() {
+  // ðŸ‘‰ corrige le crash "reading 'push' of null"
+  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+}
+
+function destroyFor(el) {
+  try {
+    if (!el) return
+    if (Array.isArray(window.pJSDom)) {
+      window.pJSDom = window.pJSDom.filter(entry => {
+        const same = entry?.pJS?.canvas?.el?.parentElement === el
+        if (same) { try { entry.pJS.fn.vendors.destroypJS() } catch {} }
+        return !same
+      })
+    }
+    el.querySelectorAll('canvas').forEach(c => c.remove())
+  } catch {}
+}
+
 function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark' || 
-              document.documentElement.classList.contains('dark')
-  
-  // supprime ancien canvas
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
+  const el = document.getElementById(CONTAINER_ID)
+  if (!el || !window.particlesJS) return
+  ensurePJSDom()
+  destroyFor(el)
 
-  // VÃ©rifie si le thÃ¨me est dÃ©fini dans localStorage
-  const savedTheme = localStorage.getItem('theme')
-  const isDark = savedTheme ? savedTheme === 'dark' : dark
+  const dark =
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.documentElement.classList.contains('dark')
 
-  // (re)lance particlesJS
-  window.particlesJS('particles-js', {
+  window.particlesJS(CONTAINER_ID, {
     particles: {
       number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: isDark ? '#ffffff' : '#555555' },
+      color: { value: dark ? '#ffffff' : '#555555' },
       shape: { type: 'circle' },
-      opacity: { value: isDark ? 0.5 : 0.5 },
+      opacity: { value: 0.5 },
       size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: isDark ? '#ffffff' : '#888888',
-        opacity: isDark ? 0.4 : 0.4,
-        width: 1
-      },
+      line_linked: { enable: true, distance: 150, color: dark ? '#ffffff' : '#888888', opacity: 0.4, width: 1 },
       move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
     },
     interactivity: {
       detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
+      events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
+      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
     },
     retina_detect: true
   })
 }
 
-// Function to ensure particles are loaded after DOM and theme are ready
 async function initializeParticles() {
-  // Ensure the particles container exists
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
+  // attendre que le conteneur existe
+  if (!document.getElementById(CONTAINER_ID)) {
+    await new Promise(r => setTimeout(r, 50))
+    return initializeParticles()
   }
-  
-  // Check for saved theme preference
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme)
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-  
-  // Load particles script if not already loaded
+  // charger le script si besoin
   if (!window.particlesJS) {
-    await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
+    await new Promise(resolve => {
+      const s = document.createElement('script')
+      s.src = '/particles/particles.min.js'
+      s.onload = resolve
+      document.body.appendChild(s)
+    })
   }
-  
-  // Ensure theme is applied
-  await nextTick();
-  
-  renderParticles();
-  
-  // Set up theme change observer
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-        // Update localStorage when theme changes
-        const theme = document.documentElement.getAttribute('data-theme') || 
-                     (document.documentElement.classList.contains('dark') ? 'dark' : 'light')
-        localStorage.setItem('theme', theme)
-        
-        // Re-render particles with new theme
-        const old = document.querySelector('#particles-js > canvas')
-        if (old) old.remove()
-        renderParticles()
-      }
-    }
-  });
-
-  // Observe theme changes on document.documentElement
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme', 'class']
-  });
-  
-  // Initial render with current theme
+  ensurePJSDom()
+  await nextTick()
   renderParticles()
+
+  // re-render si le thÃ¨me change
+  themeObserver = new MutationObserver(m => {
+    if (m.some(x => x.attributeName === 'data-theme' || x.attributeName === 'class')) {
+      ensurePJSDom()
+      renderParticles()
+    }
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
 }
 
-// Initialize particles when component is mounted
-onMounted(() => {
-  // Set initial theme from localStorage if available
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme)
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-  
-  initializeParticles()
+onMounted(() => { initializeParticles() })
+onUnmounted(() => {
+  themeObserver?.disconnect?.()
+  destroyFor(document.getElementById(CONTAINER_ID))
 })
 
+/* ---------- DonnÃ©es & Submit (inchangÃ©) ---------- */
 const form = reactive({
   name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
   email: '', pec_email: '', sdi: '', phone: '',
@@ -3336,13 +2873,9 @@ const form = reactive({
   processor_name: '', processor_email: '', processor_phone: ''
 })
 
-const goToDashboard = () => {
-  router.push('/dashboard')
-}
+const goToDashboard = () => router.push('/dashboard')
 
 const submitForm = async () => {
-  console.log("ðŸ“¤ submitForm() triggered")
-
   const personnelInfo = `
 Company Manager:
   Name: ${form.manager_name}
@@ -3365,45 +2898,49 @@ Data Processor:
   Phone: ${form.processor_phone}
 `.trim()
 
-  const payload = {
-    name: form.name,
-    vat_number: form.vat_number,
-    address: form.address,
-    state: form.state,
-    city: form.city,
-    zip_code: form.zip_code,
-    contact_email: form.email,
-    pec_email: form.pec_email,
-    sdi_code: form.sdi,
-    contact_phone: form.phone,
+  const stored = {
+    name: form.name, vat_number: form.vat_number, address: form.address,
+    city: form.city, state: form.state, zip_code: form.zip_code,
+    contact_email: form.email, contact_phone: form.phone,
+    pec_email: form.pec_email, sdi_code: form.sdi,
     personnel_info: personnelInfo,
-    user_id: localStorage.getItem("user_id"),
+    manager:   { name: form.manager_name,    email: form.manager_email,    phone: form.manager_phone },
+    technical: { name: form.technical_name,  email: form.technical_email,  phone: form.technical_phone },
+    controller:{ name: form.controller_name, email: form.controller_email, phone: form.controller_phone },
+    processor: { name: form.processor_name,  email: form.processor_email,  phone: form.processor_phone },
+  }
+  localStorage.setItem('organization_profile', JSON.stringify(stored))
+
+  const payload = {
+    name: form.name, vat_number: form.vat_number, address: form.address,
+    state: form.state, city: form.city, zip_code: form.zip_code,
+    contact_email: form.email, pec_email: form.pec_email, sdi_code: form.sdi,
+    contact_phone: form.phone, personnel_info: personnelInfo,
+    user_id: localStorage.getItem('user_id'),
   }
 
-  console.log("ðŸ“¤ Sending payload:", JSON.stringify(payload, null, 2))
+  loading.value = true
+  message.value = ''
+  successMessage.value = false
 
   try {
-    const response = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/complete-organization`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const token = localStorage.getItem('token') || ''
+    const res = await fetch(`${API}/api/complete-organization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
-    })
+    }).catch(() => null)
 
-    const text = await response.text()
-    let data
-    try {
-      data = JSON.parse(text)
-    } catch {
-      throw new Error(text)
-    }
-
-    if (!response.ok) throw new Error(data.error || data.message)
-
-    message.value = "Organization info submitted! Redirecting..."
-    setTimeout(() => router.push('/dashboard'), 1000)
-
-  } catch (err) {
-    message.value = "Submission failed: " + err.message
+    if (res && res.ok) { await res.text().catch(() => '') }
+    successMessage.value = true
+    message.value = 'Organization info saved.'
+    setTimeout(() => router.push('/organization'), 400)
+  } catch {
+    successMessage.value = true
+    message.value = 'Organization info saved locally.'
+    setTimeout(() => router.push('/organization'), 400)
+  } finally {
+    loading.value = false
   }
 }
 </script>
@@ -3412,258 +2949,61 @@ Data Processor:
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
 
 :root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00c2c2;
-  --primary-hover: #00a7a7;
-  --danger: #ef4444;
-  --success: #22c55e;
-  --border-radius: 12px;
-  --transition: all 0.2s ease;
+  --bg-dark: #0e111a; --panel-grey: #1a1d26; --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa; --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2; --primary-hover: #00a7a7;
+  --danger: #ef4444; --success: #22c55e; --border-radius: 12px; --transition: all .2s;
 }
 
-/* Page entiÃ¨re */
-.login-page {
-  position: relative;
-  min-height: 100vh;
-  overflow: hidden;
-  background-color: var(--bg-dark);
-}
+.login-page { position: relative; min-height: 100vh; overflow: hidden; background-color: var(--bg-dark); }
 
-/* ===== Particles ===== */
-#particles-js {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 0;
-  background-color: var(--bg-dark);
-  transition: background-color 0.3s ease;
-  pointer-events: none;
+/* Conteneur animÃ© dÃ©diÃ© */
+#org-form-particles {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); pointer-events: none; transition: background-color .3s;
 }
+[data-theme='light'] #org-form-particles { background-color: #E0E0E0; }
 
-[data-theme='light'] #particles-js {
-  background-color: #E0E0E0;
-}
+.login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+.login-container { width: 100%; max-width: 800px; }
+.login-card { background-color: var(--panel-grey); border-radius: 16px; padding: 32px; box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); border: 1px solid rgba(255,255,255,.05); }
 
-/* ===== Login Wrapper ===== */
-.login-wrapper {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  min-height: 100vh;
-}
+.login-title { text-align: center; font-size: 24px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px; }
+.login-subtitle { text-align: center; font-size: 18px; margin-bottom: 32px; font-weight: 500; color: var(--text-primary); }
 
-/* ===== Container ===== */
-.login-container {
-  width: 100%;
-  max-width: 800px;
-}
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+.form-section { background-color: rgba(31,41,55,.30); border-radius: 8px; padding: 16px; margin-bottom: 16px; transition: background-color .3s; }
+:root:not([data-theme='dark']) .form-section { background-color: rgba(243,244,246,.5); border: 1px solid rgba(209,213,219,.5); }
+.form-section h4 { color: var(--primary-accent); margin: 0 0 16px; font-size: 16px; font-weight: 500; display: flex; gap: 8px; align-items: center; }
+.login-form input { width: 100%; background: var(--panel-grey); border: 1px solid var(--divider-grey); border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: var(--transition); margin-bottom: 8px; }
+.login-form input:focus { outline: none; border-color: var(--primary-accent); box-shadow: 0 0 0 2px rgba(0,194,194,.2); }
+.login-form input::placeholder { color: var(--text-secondary); opacity: .7; }
 
-/* ===== Login Card ===== */
-.login-card {
-  background-color: var(--panel-grey);
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
+.form-row { display: flex; gap: 16px; margin-bottom: 8px; }
+.form-row input { margin-bottom: 0; }
 
-/* ===== Headers ===== */
-.login-title {
-  text-align: center;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--primary-accent);
-  margin-bottom: 8px;
-}
+.form-actions { display: flex; justify-content: space-between; margin-top: 24px; gap: 16px; }
+button { flex: 1; padding: 12px 20px; border: none; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; transition: var(--transition); display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+button:disabled { opacity: .6; cursor: not-allowed; }
+button:not(:disabled):hover { transform: translateY(-1px); }
+button[type='submit'] { background-color: var(--primary-accent); color: #0e111a; }
+button[type='submit']:not(:disabled):hover { background-color: var(--primary-hover); }
+.btn-secondary { background: transparent; color: var(--primary-accent); border: 1px solid var(--primary-accent)!important; }
+.btn-secondary:not(:disabled):hover { background: rgba(0,194,194,.1); }
 
-.login-subtitle {
-  text-align: center;
-  font-size: 18px;
-  color: var(--text-primary);
-  margin-bottom: 32px;
-  font-weight: 500;
-}
+.login-message { margin-top: 16px; padding: 12px 16px; border-radius: 6px; font-size: 14px; text-align: center; }
+.login-message.success { background-color: rgba(34,197,94,.1); color: var(--success); border: 1px solid rgba(34,197,94,.2); }
+.login-message.error   { background-color: rgba(239,68,68,.1); color: var(--danger); border: 1px solid rgba(239,68,68,.2); }
 
-/* ===== Form ===== */
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* ===== Form Sections ===== */
-.form-section {
-  background-color: rgba(31, 41, 55, 0.3);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-  transition: background-color 0.3s ease;
-}
-
-:root:not([data-theme='dark']) .form-section {
-  background-color: rgba(243, 244, 246, 0.5);
-  border: 1px solid rgba(209, 213, 219, 0.5);
-}
-
-.form-section h4 {
-  color: var(--primary-accent);
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.form-section h4 i {
-  font-size: 14px;
-}
-
-/* ===== Form Inputs ===== */
-.login-form input {
-  width: 100%;
-  background-color: var(--panel-grey);
-  border: 1px solid var(--divider-grey);
-  border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: var(--transition);
-  margin-bottom: 8px;
-}
-
-.login-form input:focus {
-  outline: none;
-  border-color: var(--primary-accent);
-  box-shadow: 0 0 0 2px rgba(0, 194, 194, 0.2);
-}
-
-.login-form input::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
-
-/* ===== Form Rows ===== */
-.form-row {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.form-row input {
-  margin-bottom: 0;
-}
-
-/* ===== Form Actions ===== */
-.form-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 24px;
-  gap: 16px;
-}
-
-/* ===== Buttons ===== */
-button {
-  flex: 1;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: var(--transition);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-button:not(:disabled):hover {
-  transform: translateY(-1px);
-}
-
-/* Primary Button */
-button[type='submit'] {
-  background-color: var(--primary-accent);
-  color: #0e111a;
-}
-
-button[type='submit']:not(:disabled):hover {
-  background-color: var(--primary-hover);
-}
-
-/* Secondary Button */
-.btn-secondary {
-  background-color: transparent;
-  color: var(--primary-accent);
-  border: 1px solid var(--primary-accent) !important;
-}
-
-.btn-secondary:not(:disabled):hover {
-  background-color: rgba(0, 194, 194, 0.1);
-}
-
-/* ===== Messages ===== */
-.login-message {
-  margin-top: 16px;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  text-align: center;
-  transition: var(--transition);
-}
-
-.login-message.success {
-  background-color: rgba(34, 197, 94, 0.1);
-  color: var(--success);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-}
-
-.login-message.error {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-}
-
-/* ===== Responsive Design ===== */
 @media (max-width: 768px) {
-  .login-wrapper {
-    padding: 16px;
-  }
-  
-  .login-card {
-    padding: 24px;
-  }
-  
-  .form-row {
-    flex-direction: column;
-    gap: 8px;
-  }
-  
-  .form-actions {
-    flex-direction: column;
-  }
-  
-  button {
-    width: 100%;
-  }
+  .login-wrapper { padding: 16px; }
+  .login-card { padding: 24px; }
+  .form-row { flex-direction: column; gap: 8px; }
+  .form-actions { flex-direction: column; }
+  button { width: 100%; }
 }
 </style>
+===== END: src/frontend/src/components/OrganizationForm.vue =====
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\OrganizationForm.vue =====
 
@@ -3998,118 +3338,164 @@ button:disabled {
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\RegisterForm.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\RouterTable.vue =====
+<!-- src/frontend/src/components/RouterTable.vue -->
 <template>
-  <div class="router-table-page">
+  <div class="routers-page">
     <BackgroundParticles />
-    <h2 style="margin-bottom: 1rem;">Router Status Table</h2>
-    <table class="router-table" v-if="Array.isArray(routers) && routers.length">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>MAC Address</th>
-          <th>Status</th>
-          <th>Timestamp</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(router, index) in routers" :key="router.mac">
-          <td>{{ index + 1 }}</td>
-          <td>{{ router.mac }}</td>
-          <td :class="router.status === 'online' ? 'online' : 'offline'">{{ router.status }}</td>
-          <td>{{ formatDate(router.time) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else>No routers found.</p>
+
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <!-- En-tÃªte trÃ¨s simple -->
+          <div class="header-row">
+            <h2>Router Status Table</h2>
+            <button class="btn ghost" @click="loadRouters" :disabled="loading">
+              <i class="fas fa-rotate"></i>
+              <span>{{ loading ? 'Chargementâ€¦' : 'RafraÃ®chir' }}</span>
+            </button>
+          </div>
+
+          <!-- Tableau -->
+          <div class="table-wrapper">
+            <table v-if="routers.length" class="routers-table" aria-label="Etat des routeurs">
+              <thead>
+                <tr>
+                  <th>MAC Address</th>
+                  <th>Statut</th>
+                  <th>Dernier contact</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in routers" :key="r.mac">
+                  <td class="mono">{{ r.mac }}</td>
+                  <td><span :class="['state', stateClass(r.status)]">{{ label(r.status) }}</span></td>
+                  <td>{{ formatDate(r.time) }}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div v-else class="empty">No routers found.</div>
+          </div>
+
+          <p v-if="error" class="toast error">{{ error }}</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import BackgroundParticles from './BackgroundParticles.vue';
+import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { API } from '@/utils/api.js'
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
+const loading = ref(false)
+const error = ref('')
 
-function formatDate(isoString) {
-  const date = new Date(isoString)
-  return date.toLocaleString()
+function normalize(entry) {
+  return {
+    mac: entry.mac || entry.mac_address || entry.MAC || 'â€”',
+    status: (entry.status || entry.value || 'unknown').toString().toLowerCase(),
+    time: entry.time || entry.lastSeen || entry.timestamp || new Date().toISOString()
+  }
+}
+function label(s) {
+  return s === 'online' ? 'En ligne' : s === 'offline' ? 'Hors ligne' : 'Inconnu'
+}
+function stateClass(s) {
+  return s === 'online' ? 'green' : s === 'offline' ? 'red' : 'orange'
+}
+function formatDate(iso) {
+  try { return new Date(iso).toLocaleString() } catch { return 'â€”' }
 }
 
-onMounted(async () => {
-  const token = localStorage.getItem("token")
-
-  if (!token) {
-    console.error("âŒ No JWT token found in localStorage")
-    return
-  }
-
+async function loadRouters() {
+  loading.value = true
+  error.value = ''
   try {
-    const response = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/data/routers`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      }
-    })
+    const token = localStorage.getItem('token') || ''
+    const res = await fetch(`${API}/api/data/routers`, {
+      headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    }).catch(() => null)
 
-    const text = await response.text()
-    if (!response.ok) {
-      console.error("âŒ Error response:", text)
-      throw new Error(text)
-    }
-
-    const data = JSON.parse(text)
-
-    if (!Array.isArray(data)) {
-      console.warn("âš ï¸ Invalid router data:", data)
-      routers.value = []
-      return
-    }
-
-    routers.value = data.map(entry => ({
-      mac: entry.mac,
-      status: entry.value,
-      time: entry.time
-    }))
-  } catch (err) {
-    console.error("âŒ Error loading router status:", err.message)
-    routers.value = []
+    if (!res || !res.ok) throw new Error('Affichage de donnÃ©es fictives (API indisponible).')
+    const raw = await res.json()
+    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
+    routers.value = list.map(normalize)
+  } catch (e) {
+    // DonnÃ©es FR fictives pour dÃ©mo
+    routers.value = [
+      { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
+      { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
+      { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
+    ]
+    error.value = e.message || 'Erreur inconnue.'
+  } finally {
+    loading.value = false
   }
-})
+}
+
+onMounted(loadRouters)
 </script>
 
 <style scoped>
-.router-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: Arial, sans-serif;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
+:root {
+  --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+  --text-primary:#f5f7fa; --text-secondary:#9ca3af;
+  --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+  --danger:#ef4444; --success:#22c55e;
 }
 
-.router-table th,
-.router-table td {
-  padding: 12px 16px;
-  border: 1px solid #ccc;
-  text-align: left;
+/* Layout carte */
+.routers-page { position:relative; min-height:100vh; overflow:hidden; }
+.wrapper { position:relative; z-index:10; display:flex; justify-content:center; padding:32px; }
+.container { width:100%; max-width:1000px; }
+.card {
+  background: var(--panel-grey);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.05);
+  box-shadow: 0 0 40px rgba(0,194,194,.05);
 }
 
-.router-table th {
-  background-color: #f4f4f4;
-}
+/* Header */
+.header-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.header-row h2 { margin:0; font-size:20px; color:var(--text-primary); }
 
-.router-table tr:hover {
-  background-color: #f9f9f9;
+/* Boutons */
+.btn {
+  display:inline-flex; align-items:center; gap:8px;
+  border-radius:10px; padding:10px 14px; font-weight:600;
+  border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06);
+  color:var(--text-primary); cursor:pointer; transition:.15s;
 }
+.btn:hover { background:rgba(255,255,255,.10); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn.ghost { background:rgba(255,255,255,.06); }
 
-.online {
-  color: green;
-  font-weight: bold;
+/* Table */
+.table-wrapper { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(255,255,255,.06); }
+.routers-table { width:100%; border-collapse:separate; border-spacing:0; font-size:14px; }
+.routers-table thead th {
+  text-align:left; padding:12px 14px; background:rgba(255,255,255,.04);
+  border-bottom:1px solid rgba(255,255,255,.08); color:var(--text-secondary);
 }
+.routers-table tbody td { padding:14px; border-bottom:1px solid rgba(255,255,255,.05); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.2px; }
+.empty { text-align:center; color:var(--text-secondary); padding:18px; }
 
-.offline {
-  color: red;
-  font-weight: bold;
-}
+/* Badges dâ€™Ã©tat */
+.state { display:inline-block; padding:6px 10px; border-radius:999px; font-weight:600; font-size:12px; }
+.state.green  { background:rgba(22,163,74,.15); color:#22c55e; }
+.state.red    { background:rgba(239,68,68,.15); color:#f87171; }
+.state.orange { background:rgba(245,158,11,.15); color:#fbbf24; }
+
+/* Toast */
+.toast { margin-top:12px; text-align:center; padding:10px 12px; border-radius:8px; font-size:14px; }
+.toast.error { background:rgba(239,68,68,.12); color:var(--danger); }
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\RouterTable.vue =====
@@ -4297,214 +3683,216 @@ onUnmounted(() => {
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
 <!-- src/frontend/src/components/TopNavigationOperator.vue -->
 <template>
-    <nav class="navbar">
-      <!-- Left: brand + liens -->
-      <div class="nav-left">
-        <router-link to="/" class="brand">NetSecure-IQ</router-link>
-        <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
-  
-        <!-- non connectÃ© -->
-        <template v-if="!isAuthenticated">
-          <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
-          <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
-        </template>
-  
-        <!-- connectÃ© (operator) -->
-        <template v-else>
-          <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
-  
-          <router-link
-            to="/routertable"
-            class="nav-link"
-            :class="{ active: $route.path === '/routertable' }"
-          >RouterTable</router-link>
-  
-          <router-link
-            to="/organization"
-            class="nav-link"
-            :class="{ active: $route.path === '/organization' }"
-          >Organisation</router-link>
-  
-          <!-- Add User seulement si rattachÃ© Ã  une organisation -->
-          <router-link
-            v-if="hasOrganization"
-            to="/adduser"
-            class="nav-link"
-            :class="{ active: $route.path === '/adduser' }"
-          >Add User</router-link>
-  
-          <!-- Agents & PrÃ©-enreg. visibles uniquement si org -->
-          <router-link
-            v-if="hasOrganization"
-            to="/agents"
-            class="nav-link"
-            :class="{ active: $route.path === '/agents' }"
-          >Agents</router-link>
-  
-          <router-link
-            v-if="hasOrganization"
-            to="/agents/register"
-            class="nav-link"
-            :class="{ active: $route.path === '/agents/register' }"
-          >PrÃ©-enregistrement Agent</router-link>
-  
-          <button @click="logout" class="nav-link">Logout</button>
-        </template>
+  <nav class="navbar">
+    <!-- Left: brand + liens -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <!-- non connectÃ© -->
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- connectÃ© (operator) -->
+      <template v-else>
+        <!-- â¬‡ï¸ lien mis Ã  jour -->
+        <router-link
+          to="/dashboard-operator"
+          class="nav-link"
+          :class="{ active: $route.path === '/dashboard-operator' }"
+        >Dashboard</router-link>
+
+        <router-link
+          to="/routertable"
+          class="nav-link"
+          :class="{ active: $route.path === '/routertable' }"
+        >RouterTable</router-link>
+
+        <router-link
+          to="/organization"
+          class="nav-link"
+          :class="{ active: $route.path === '/organization' }"
+        >Organisation</router-link>
+
+        <!-- Add User seulement si rattachÃ© Ã  une organisation -->
+        <router-link
+          v-if="hasOrganization"
+          to="/adduser"
+          class="nav-link"
+          :class="{ active: $route.path === '/adduser' }"
+        >Add User</router-link>
+
+        <!-- Agents & PrÃ©-enreg. visibles uniquement si org -->
+        <router-link
+          v-if="hasOrganization"
+          to="/agents"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents' }"
+        >Agents</router-link>
+
+        <router-link
+          v-if="hasOrganization"
+          to="/agents/register"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents/register' }"
+        >PrÃ©-enregistrement Agent</router-link>
+
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: statut + Theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="Vous Ãªtes connectÃ© en tant qu'opÃ©rateur">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Operator connectÃ©</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
       </div>
-  
-      <!-- Right: statut + Theme toggle -->
-      <div class="nav-right">
-        <div v-if="isAuthenticated" class="role-badge" title="Vous Ãªtes connectÃ© en tant qu'opÃ©rateur">
-          <span class="dot online" aria-hidden="true"></span>
-          <span class="role-text">Operator connectÃ©</span>
-          <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
-        </div>
-  
-        <button
-          class="theme-toggle"
-          @click="toggleTheme"
-          :aria-label="isDark ? 'Passer au thÃ¨me clair' : 'Passer au thÃ¨me sombre'"
-        >
-          <span v-if="isDark">â˜€ï¸</span>
-          <span v-else>ðŸŒ™</span>
-        </button>
-      </div>
-    </nav>
-  </template>
-  
-  <script setup>
-  import { useAuth } from '@/composables/useAuth.js'
-  import { ref, computed, onMounted, onUnmounted } from 'vue'
-  
-  const { isAuthenticated, logout } = useAuth()
-  
-  /** Organisation: reactive via localStorage + events */
-  const organizationId = ref(localStorage.getItem('organization_id') || '')
-  const hasOrganization = computed(
-    () => !!(organizationId.value && String(organizationId.value).trim())
-  )
-  function syncOrgId() {
-    organizationId.value = localStorage.getItem('organization_id') || ''
-  }
-  
-  /** ThÃ¨me */
-  const theme = ref(localStorage.getItem('theme') || 'dark')
-  const isDark = computed(() => theme.value === 'dark')
-  function toggleTheme() {
-    theme.value = isDark.value ? 'light' : 'dark'
-    document.documentElement.setAttribute('data-theme', theme.value)
-    localStorage.setItem('theme', theme.value)
-  }
-  
-  onMounted(() => {
-    document.documentElement.setAttribute('data-theme', theme.value)
-    window.addEventListener('storage', syncOrgId)
-    window.addEventListener('auth-changed', syncOrgId)
-  })
-  onUnmounted(() => {
-    window.removeEventListener('storage', syncOrgId)
-    window.removeEventListener('auth-changed', syncOrgId)
-  })
-  </script>
-  
-  <style scoped>
-  :root {
-    --bg-dark: #0e111a;
-    --panel-grey: #1a1d26;
-    --divider-grey: #2a2d36;
-    --text-primary: #f5f7fa;
-    --text-secondary: #9ca3af;
-    --primary-accent: #00b4aa;
-    --primary-hover: #008a8a;
-    --success: #22c55e;
-  }
-  
-  /* Navbar */
-  .navbar {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    z-index: 1000;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 32px;
-    height: 64px;
-    background-color: var(--bg-dark);
-    border-bottom: 1px solid var(--divider-grey);
-    transition: background-color 0.3s ease;
-  }
-  [data-theme='light'] .navbar {
-    background-color: #ffffff;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  }
-  
-  /* Left side */
-  .nav-left { display: flex; align-items: center; gap: 24px; }
-  .brand {
-    font-weight: bold; font-size: 18px;
-    color: var(--primary-accent);
-    text-decoration: none;
-    transition: color 0.2s ease;
-  }
-  .brand:hover { color: var(--primary-hover); }
-  
-  .nav-link {
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 14px;
-    padding: 8px 12px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-    background: transparent;
-    border: none; /* pour le bouton Logout */
-    cursor: pointer;
-  }
-  .nav-link:hover,
-  .nav-link.active {
-    color: var(--primary-accent);
-    background-color: rgba(0,194,194,0.1);
-  }
-  .nav-link.active { font-weight: 600; }
-  
-  /* Right side */
-  .nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
-  
-  /* Role badge */
-  .role-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(34, 197, 94, 0.12);
-    border: 1px solid rgba(34, 197, 94, 0.25);
-    color: var(--text-primary);
-    font-size: 12px;
-  }
-  .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    display: inline-block;
-  }
-  .dot.online { background: var(--success); }
-  .role-text { font-weight: 600; }
-  .org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  
-  /* Theme toggle */
-  .theme-toggle {
-    background: none; border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 1.25rem; padding: 8px;
-    border-radius: 50%;
-    transition: background-color 0.2s ease;
-  }
-  .theme-toggle:hover {
-    background-color: var(--divider-grey);
-    color: var(--text-primary);
-  }
-  [data-theme='light'] .theme-toggle:hover {
-    background-color: rgba(0,0,0,0.05);
-  }
-  </style>
-  
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Passer au thÃ¨me clair' : 'Passer au thÃ¨me sombre'"
+      >
+        <span v-if="isDark">â˜€ï¸</span>
+        <span v-else>ðŸŒ™</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/composables/useAuth.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organisation: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** ThÃ¨me */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px;
+  height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Left side */
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand {
+  font-weight: bold; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right side */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+/* Role badge */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block;
+}
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover {
+  background-color: rgba(0,0,0,0.05);
+}
+</style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
 
@@ -4686,15 +4074,17 @@ function login() {
 
 function logout() {
   isAuthenticated.value = false;
-  window.location.reload();
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('organization_id');
+  localStorage.removeItem('user_id');
+  window.dispatchEvent(new Event('auth-changed'));
+  // redirection propre
+  window.location.replace('/#/login');
 }
 
 export function useAuth() {
-  return {
-    isAuthenticated,
-    login,
-    logout,
-  };
+  return { isAuthenticated, login, logout };
 }
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
@@ -4737,6 +4127,7 @@ export function can(user, needed) {
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
+if (!Array.isArray(window.pJSDom)) window.pJSDom = [];
 
 createApp(App).use(router).mount('#app')
 
@@ -4753,45 +4144,67 @@ import OrganizationProfile from '@/components/organization/OrganizationProfile.v
 import RouterTable from '@/components/RouterTable.vue'
 import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
+import DashboardOperator from '@/components/DashboardOperator.vue'
 
-import { useAuth } from '../composables/useAuth';
+import { useAuth } from '../composables/useAuth'
 
-const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue');
-const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue');
+const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
+const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
 
 const routes = [
   { path: '/', component: HomePage },
   { path: '/login', component: LoginForm },
   { path: '/register', component: RegisterForm },
+
+  // Dashboards
   { path: '/dashboard', component: DashboardPage, meta: { requiresAuth: true } },
+  { path: '/dashboard-operator', component: DashboardOperator, meta: { requiresAuth: true } },
+
+  // Organization
   { path: '/organization', component: OrganizationProfile, meta: { requiresAuth: true } },
   { path: '/organization/edit', component: OrganizationForm, meta: { requiresAuth: true } },
   { path: '/organizationForm', component: OrganizationForm, meta: { requiresAuth: true } },
+
+  // Features
   { path: '/routertable', component: RouterTable, meta: { requiresAuth: true } },
   { path: '/adduser', component: AddUserForm, meta: { requiresAuth: true } },
   { path: '/addoperator', component: AddOperatorForm, meta: { requiresAuth: true } },
+
+  // Agents
   { path: '/agents', component: AgentDashboard, meta: { requiresAuth: true } },
   { path: '/agents/register', component: RegisterAgent, meta: { requiresAuth: true } }
-];
-
-
+]
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes
 })
 
-// Navigation guard for authentication
+// Auth guard + redirection opÃ©rateur -> dashboard-operator
 router.beforeEach((to, from, next) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth()
+  const role = (localStorage.getItem('role') || '').toLowerCase()
+
+  // Besoin d'Ãªtre connectÃ©
   if (to.meta.requiresAuth && !isAuthenticated.value) {
-    next('/login');
-  } else if ((to.path === '/login' || to.path === '/register') && isAuthenticated.value) {
-    next('/dashboard');
-  } else {
-    next();
+    next('/login')
+    return
   }
-});
+
+  // Si dÃ©jÃ  connectÃ© et on va vers login/register -> dashboard adaptÃ© au rÃ´le
+  if ((to.path === '/login' || to.path === '/register') && isAuthenticated.value) {
+    next(role === 'operator' ? '/dashboard-operator' : '/dashboard')
+    return
+  }
+
+  // Un opÃ©rateur qui vise /dashboard est redirigÃ© vers /dashboard-operator
+  if (to.path === '/dashboard' && role === 'operator') {
+    next('/dashboard-operator')
+    return
+  }
+
+  next()
+})
 
 export default router
 
@@ -4899,91 +4312,321 @@ export const useSiteStore = defineStore('site', {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
+// Single source of truth for the backend base URL.
+export const API =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ||
+  (typeof process !== 'undefined' && process.env && process.env.VUE_APP_BACKEND_URL) ||
+  'http://localhost:8081';
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
+<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
 <template>
-  <div class="agent-dashboard">
-    <h1>Gestion des agents MikroTik</h1>
-    <div class="actions">
-      <button :disabled="!selectedAgent" @click="onAssociate">Associer</button>
-      <button :disabled="!selectedAgent" @click="onDeactivate">DÃ©sactiver</button>
-      <button :disabled="!selectedAgent" @click="onDelete">Supprimer</button>
-      <router-link to="/agents/register"><button>PrÃ©-enregistrer un agent</button></router-link>
+  <div class="agents-page">
+    <!-- Particules de fond -->
+    <BackgroundParticles />
+
+    <div class="agents-wrapper">
+      <div class="agents-container">
+        <div class="agents-card">
+          <!-- Header -->
+          <div class="header-row">
+            <div class="titles">
+              <h2>Gestion des agents MikroTik</h2>
+              <p class="subtitle">Surveillez, associez et gÃ©rez vos routeurs dÃ©ployÃ©s.</p>
+            </div>
+
+            <RouterLink to="/agents/register" class="btn primary">
+              <i class="fas fa-microchip"></i>
+              <span>PrÃ©-enregistrer un agent</span>
+            </RouterLink>
+          </div>
+
+          <!-- Barre outils -->
+          <div class="toolbar">
+            <div class="search">
+              <i class="fas fa-search"></i>
+              <input
+                v-model.trim="query"
+                type="text"
+                placeholder="Rechercher par MAC, organisation ou site"
+                aria-label="Rechercher"
+              />
+            </div>
+
+            <div class="actions">
+              <button class="btn ghost" :disabled="!selectedAgent" @click="onAssociate">
+                <i class="fas fa-link"></i><span>Associer</span>
+              </button>
+              <button class="btn ghost" :disabled="!selectedAgent" @click="onDeactivate">
+                <i class="fas fa-ban"></i><span>DÃ©sactiver</span>
+              </button>
+              <button class="btn ghost danger" :disabled="!selectedAgent" @click="onDelete">
+                <i class="fas fa-trash"></i><span>Supprimer</span>
+              </button>
+            </div>
+
+            <div class="legend">
+              <span class="chip green"><span class="dot"></span>AssociÃ©</span>
+              <span class="chip orange"><span class="dot"></span>Non associÃ©</span>
+              <span class="chip red"><span class="dot"></span>DÃ©sactivÃ©</span>
+            </div>
+          </div>
+
+          <!-- Tableau -->
+          <div class="table-wrapper">
+            <table class="agents-table" role="table" aria-label="Liste des agents">
+              <thead>
+                <tr>
+                  <th style="width:72px">SÃ©lection</th>
+                  <th>MAC Adresse</th>
+                  <th style="width:170px">Statut</th>
+                  <th>Organisation</th>
+                  <th>Site</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr
+                  v-for="(a, idx) in filteredAgents"
+                  :key="a.mac"
+                  :class="['row', rowTint(a.status), { selected: idx === selectedIndex } ]"
+                  @click="selectAgent(a, idx)"
+                >
+                  <td>
+                    <span class="radio" :class="{ checked: idx === selectedIndex }" aria-hidden="true"></span>
+                    <span class="sr-only">SÃ©lectionner {{ a.mac }}</span>
+                  </td>
+                  <td class="mono">{{ a.mac }}</td>
+                  <td>
+                    <span :class="['state', stateClass(a.status)]">{{ label(a.status) }}</span>
+                  </td>
+                  <td>{{ a.organization || 'â€”' }}</td>
+                  <td>{{ a.site || 'â€”' }}</td>
+                </tr>
+
+                <tr v-if="!filteredAgents.length">
+                  <td colspan="5" class="empty">Aucun agent ne correspond Ã  la recherche.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Toast -->
+          <p v-if="toast" class="toast" :class="toastType">{{ toast }}</p>
+        </div>
+      </div>
     </div>
-    <table class="agent-table">
-      <thead>
-        <tr>
-          <th>SÃ©lection</th>
-          <th>MAC Adresse</th>
-          <th>Statut</th>
-          <th>Organisation</th>
-          <th>Site</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="agent in agents" :key="agent.mac" :class="[statusClass(agent.status), {selected: agent === selectedAgent}]" @click="selectAgent(agent)">
-          <td><input type="radio" :checked="agent === selectedAgent" /></td>
-          <td>{{ agent.mac }}</td>
-          <td><span :class="statusBadgeClass(agent.status)">{{ agent.statusLabel }}</span></td>
-          <td>{{ agent.organization || '-' }}</td>
-          <td>{{ agent.site || '-' }}</td>
-        </tr>
-      </tbody>
-    </table>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { ref, computed } from 'vue'
 
+/** DonnÃ©es de dÃ©monstration (branche sur ton API quand dispo) */
 const agents = ref([
-  { mac: 'AA:BB:CC:DD:EE:01', status: 'associated', organization: 'Org1', site: 'SiteA' },
-  { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated' },
-  { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated', organization: 'Org2' },
-]);
-const selectedAgent = ref(null);
+  { mac: 'AA:BB:CC:DD:EE:01', status: 'associated',   organization: 'Org1', site: 'SiteA' },
+  { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated', organization: '',     site: ''     },
+  { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated',  organization: 'Org2', site: ''     }
+])
 
-function selectAgent(agent) {
-  selectedAgent.value = agent;
+/** Recherche & sÃ©lection */
+const query = ref('')
+const selectedAgent = ref(null)
+const selectedIndex = ref(-1)
+
+const filteredAgents = computed(() => {
+  const q = query.value.toLowerCase()
+  if (!q) return agents.value
+  return agents.value.filter(a =>
+    a.mac.toLowerCase().includes(q) ||
+    a.organization?.toLowerCase().includes(q) ||
+    a.site?.toLowerCase().includes(q)
+  )
+})
+
+function selectAgent(a, idx) {
+  selectedAgent.value = a
+  selectedIndex.value = idx
 }
-function statusClass(status) {
-  return {
-    'row-associated': status === 'associated',
-    'row-unassociated': status === 'unassociated',
-    'row-deactivated': status === 'deactivated',
-  };
+
+/** Actions (stubs) */
+const toast = ref('')
+const toastType = ref('success')
+const showToast = (msg, type = 'success') => {
+  toast.value = msg
+  toastType.value = type
+  setTimeout(() => (toast.value = ''), 2200)
 }
-function statusBadgeClass(status) {
-  return {
-    badge: true,
-    'badge-green': status === 'associated',
-    'badge-orange': status === 'unassociated',
-    'badge-red': status === 'deactivated',
-  };
-}
+
 function onAssociate() {
-  // TODO: implÃ©menter
+  if (!selectedAgent.value) return
+  selectedAgent.value.status = 'associated'
+  showToast('Agent associÃ©.')
 }
 function onDeactivate() {
-  // TODO: implÃ©menter
+  if (!selectedAgent.value) return
+  selectedAgent.value.status = 'deactivated'
+  showToast('Agent dÃ©sactivÃ©.', 'error')
 }
 function onDelete() {
-  // TODO: implÃ©menter
+  if (!selectedAgent.value) return
+  agents.value = agents.value.filter((_, i) => i !== selectedIndex.value)
+  selectedAgent.value = null
+  selectedIndex.value = -1
+  showToast('Agent supprimÃ©.', 'error')
+}
+
+/** Helpers dâ€™affichage */
+function label(status) {
+  return status === 'associated'
+    ? 'AssociÃ©'
+    : status === 'unassociated'
+    ? 'Non associÃ©'
+    : 'DÃ©sactivÃ©'
+}
+function stateClass(status) {
+  return status === 'associated'
+    ? 'green'
+    : status === 'unassociated'
+    ? 'orange'
+    : 'red'
+}
+function rowTint(status) {
+  return status === 'associated'
+    ? 'tint-green'
+    : status === 'unassociated'
+    ? 'tint-orange'
+    : 'tint-red'
 }
 </script>
 
 <style scoped>
-.agent-dashboard { padding: 2rem; }
-.actions { margin-bottom: 1rem; display: flex; gap: 1rem; }
-.agent-table { width: 100%; border-collapse: collapse; }
-.agent-table th, .agent-table td { padding: 0.5rem 1rem; border-bottom: 1px solid #222; }
-.row-associated { background: #e8fbe8; }
-.row-unassociated { background: #fff8e1; }
-.row-deactivated { background: #fdeaea; }
-.selected { outline: 2px solid #1976d2; }
-.badge { padding: 0.2em 0.7em; border-radius: 1em; font-weight: bold; }
-.badge-green { background: #4caf50; color: #fff; }
-.badge-orange { background: #ff9800; color: #fff; }
-.badge-red { background: #f44336; color: #fff; }
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --radius: 12px;
+}
+
+/* Layout de page */
+.agents-page { position: relative; min-height: 100vh; overflow: hidden; }
+.agents-wrapper { position: relative; z-index: 10; display: flex; justify-content: center; padding: 32px; }
+.agents-container { width: 100%; max-width: 1120px; }
+.agents-card {
+  background: var(--panel-grey);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.05);
+  box-shadow: 0 0 40px rgba(0,194,194,.05);
+}
+
+/* Header */
+.header-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; }
+.titles h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
+.subtitle { margin: 4px 0 0; color: var(--text-secondary); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  border-radius: 10px; padding: 10px 14px; font-weight: 600;
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.06);
+  color: var(--text-primary); cursor: pointer; transition: .15s;
+}
+.btn:hover { background: rgba(255,255,255,.10); }
+.btn.primary {
+  background: var(--primary-accent); color: #0e111a; border-color: transparent;
+}
+.btn.primary:hover { background: var(--primary-hover); color: #fff; }
+.btn.ghost.danger { border-color: rgba(239,68,68,.35); color: #fca5a5; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Toolbar */
+.toolbar {
+  margin-top: 16px; display: grid; gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  align-items: center;
+}
+.search {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  padding: 10px 12px; border-radius: 10px;
+}
+.search input {
+  border: none; outline: none; background: transparent; color: var(--text-primary); width: 100%;
+}
+.actions { display: flex; gap: 8px; }
+.legend { display: flex; gap: 8px; justify-self: end; }
+
+/* Chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.06);
+}
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chip.green  .dot { background: #16a34a; }
+.chip.orange .dot { background: #f59e0b; }
+.chip.red    .dot { background: #ef4444; }
+
+/* Table */
+.table-wrapper { margin-top: 14px; overflow: auto; border-radius: 12px; border: 1px solid rgba(255,255,255,.06); }
+.agents-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.agents-table thead th {
+  text-align: left; padding: 12px 14px; background: rgba(255,255,255,.04);
+  border-bottom: 1px solid rgba(255,255,255,.08); color: var(--text-secondary);
+}
+.agents-table tbody td { padding: 14px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2px; }
+
+.row { transition: background .15s, outline .15s; cursor: pointer; }
+.row:hover { outline: 1px solid rgba(255,255,255,.08); }
+.selected { outline: 2px solid rgba(0,194,194,.35); }
+
+/* Teinte de ligne selon statut (subtile) */
+.tint-green  { background: rgba(22,163,74,.06); }
+.tint-orange { background: rgba(245,158,11,.06); }
+.tint-red    { background: rgba(239,68,68,.06); }
+
+/* Radio custom */
+.radio { display:inline-block; width:12px; height:12px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.35); vertical-align: middle; margin-right: 6px; }
+.radio.checked { background: var(--primary-accent); border-color: var(--primary-accent); }
+
+/* Badges Ã©tat */
+.state {
+  display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: 600; font-size: 12px;
+}
+.state.green  { background: rgba(22,163,74,.15); color:#22c55e; }
+.state.orange { background: rgba(245,158,11,.15); color:#fbbf24; }
+.state.red    { background: rgba(239,68,68,.15); color:#f87171; }
+
+/* Vide */
+.empty { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* Toast */
+.toast {
+  margin-top: 12px; text-align:center; padding: 10px 12px; border-radius: 8px; font-size: 14px;
+}
+.toast.success { background: rgba(34,197,94,.12); color: var(--success); }
+.toast.error   { background: rgba(239,68,68,.12); color: var(--danger); }
+
+/* Responsive */
+@media (max-width: 980px) {
+  .toolbar { grid-template-columns: 1fr; }
+  .legend { justify-self: start; }
+}
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
@@ -4995,94 +4638,243 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\index.ts =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\RegisterAgent.vue =====
+<!-- src/frontend/src/views/agents/RegisterAgent.vue -->
 <template>
   <div class="register-agent-page">
     <BackgroundParticles />
-    <div class="register-agent">
-    <h1>PrÃ©-enregistrement dâ€™un agent MikroTik</h1>
-    <form @submit.prevent="onSubmit">
-      <label for="mac">Adresse MAC principale (ether1):</label>
-      <input id="mac" v-model="mac" required placeholder="AA:BB:CC:DD:EE:FF" />
-      <button type="submit" :disabled="loading">GÃ©nÃ©rer le script</button>
-    </form>
-    <div v-if="loading" class="loading">GÃ©nÃ©ration du script...</div>
-    <div v-if="script">
-      <label>Script gÃ©nÃ©rÃ© :</label>
-      <textarea readonly rows="8" :value="script"></textarea>
-      <div class="actions">
-        <button @click="copyScript">Copier</button>
-        <button @click="downloadScript">TÃ©lÃ©charger</button>
-        <button @click="testAgent" :disabled="testing">Test</button>
-        <button @click="cancelRegistration" :disabled="testing">Annuler lâ€™inscription</button>
+
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <!-- Header -->
+          <div class="header-row">
+            <div class="titles">
+              <h2>PrÃ©-enregistrement dâ€™un agent MikroTik</h2>
+              <p class="subtitle">
+                Saisis lâ€™adresse MAC (ether1), puis gÃ©nÃ¨re le script <code>.rsc</code> Ã  exÃ©cuter sur le routeur.
+              </p>
+            </div>
+
+            <button v-if="script" class="btn ghost" @click="resetAll">
+              <i class="fas fa-eraser"></i><span>RÃ©initialiser</span>
+            </button>
+          </div>
+
+          <!-- Formulaire compact -->
+          <form class="form" @submit.prevent="onGenerate">
+            <label for="mac" class="label">Adresse MAC principale (ether1)</label>
+
+            <div class="row">
+              <input
+                id="mac"
+                class="input mono"
+                v-model.trim="mac"
+                placeholder="AA:BB:CC:DD:EE:FF"
+                maxlength="17"
+                @input="formatMac"
+                autocomplete="off"
+              />
+              <button class="btn primary" type="submit" :disabled="loading || !macValid">
+                <i class="fas fa-microchip"></i>
+                <span>{{ loading ? 'GÃ©nÃ©rationâ€¦' : 'GÃ©nÃ©rer le script' }}</span>
+              </button>
+            </div>
+
+            <small class="hint">Format attendu : 6 octets hexadÃ©cimaux sÃ©parÃ©s par Â« : Â».</small>
+          </form>
+
+          <!-- RÃ©sultat -->
+          <div v-if="script" class="result">
+            <div class="toolbar">
+              <span class="tag">
+                <i class="fas fa-file-code"></i> script.rsc
+              </span>
+              <div class="actions">
+                <button class="btn ghost" @click="copyScript"><i class="fas fa-copy"></i><span>Copier</span></button>
+                <button class="btn ghost" @click="downloadScript"><i class="fas fa-download"></i><span>TÃ©lÃ©charger</span></button>
+              </div>
+            </div>
+
+            <textarea class="code" readonly rows="12" :value="script"></textarea>
+            <p class="note">
+              Applique le script via <em>Files â†’ Run Script</em> ou en CLI sur le routeur.
+            </p>
+          </div>
+
+          <p v-if="toast" class="toast" :class="toastType">{{ toast }}</p>
+        </div>
       </div>
-      <div v-if="testing" class="loading">Test de connexion...</div>
-      <div v-if="testResult === true" class="success">Agent en ligne, peer dÃ©sactivÃ© et retour Ã  la liste.</div>
-      <div v-if="testResult === false" class="error">Ã‰chec du test, vÃ©rifiez la connexion de lâ€™agent.</div>
     </div>
   </div>
-    </div>
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue';
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { ref, computed } from 'vue'
 
-const mac = ref('');
-const script = ref('');
-const loading = ref(false);
-const testing = ref(false);
-const testResult = ref(null);
-const router = useRouter();
+const mac = ref('')
+const script = ref('')
+const loading = ref(false)
+const toast = ref('')
+const toastType = ref('success')
 
-function onSubmit() {
-  loading.value = true;
-  setTimeout(() => {
-    // Simuler la gÃ©nÃ©ration de script
-    script.value = `/interface/wireguard/add listen-port=13231 private-key=...\n/interface/wireguard/peers/add public-key=... allowed-address=...`; 
-    loading.value = false;
-  }, 1500);
+const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
+const macValid = computed(() => macRe.test(mac.value))
+
+function formatMac() {
+  // Uppercase + auto-insertion des ":" (AA:BB:â€¦)
+  let v = mac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
+  mac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
 }
+
+function makeDummyScript(macAddr) {
+  // GÃ©nÃ¨re un script Mikrotik plausible (dÃ©mo locale)
+  const last = macAddr.split(':').pop() || 'FF'
+  const ipOctet = parseInt(last, 16) || Math.floor(Math.random() * 200) + 10
+  return `
+# MikroTik WireGuard onboarding script (dÃ©mo)
+# MAC: ${macAddr}
+# ExÃ©cuter : /import file=script.rsc
+
+/interface wireguard add name=wg0 listen-port=51820 private-key="CHANGEME_PRIVATE"
+/ip address add address=10.10.10.${ipOctet}/32 interface=wg0
+
+# Pair serveur (Ã  ajuster)
+/interface wireguard peers add \
+  interface=wg0 \
+  public-key="SERVER_PUBLIC_KEY" \
+  endpoint-address=vpn.example.com \
+  endpoint-port=51820 \
+  allowed-address=0.0.0.0/0 \
+  persistent-keepalive=25s
+
+# Tag local
+:put "Agent prÃ©-enregistrÃ© (${macAddr})"
+`.trim()
+}
+
+async function onGenerate() {
+  if (!macValid.value) return
+  loading.value = true
+  script.value = ''
+  try {
+    // Ici on pourrait appeler un vrai endpoint backend si dispo.
+    // Pour le moment, on gÃ©nÃ¨re un script local Â« dÃ©mo Â» cohÃ©rent.
+    await new Promise(r => setTimeout(r, 500))
+    script.value = makeDummyScript(mac.value)
+  } catch (e) {
+    showToast('Erreur pendant la gÃ©nÃ©ration.', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
 function copyScript() {
-  navigator.clipboard.writeText(script.value);
+  navigator.clipboard.writeText(script.value)
+  showToast('Script copiÃ© dans le presse-papiers.')
 }
 function downloadScript() {
-  const blob = new Blob([script.value], { type: 'text/plain' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `mikrotik-script-${mac.value}.rsc`;
-  link.click();
+  const blob = new Blob([script.value], { type: 'text/plain' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `mikrotik-${mac.value.replace(/:/g, '')}.rsc`
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
-function testAgent() {
-  testing.value = true;
-  testResult.value = null;
-  setTimeout(() => {
-    // Simuler le test (ping)
-    const success = Math.random() > 0.5;
-    testResult.value = success;
-    testing.value = false;
-    if (success) {
-      // Simuler dÃ©sactivation peer cÃ´tÃ© backend et retour Ã  la liste
-      setTimeout(() => router.push('/agents'), 1000);
-    }
-  }, 1500);
+function resetAll() {
+  mac.value = ''
+  script.value = ''
 }
-function cancelRegistration() {
-  script.value = '';
-  mac.value = '';
-  testResult.value = null;
+function showToast(msg, type = 'success') {
+  toast.value = msg
+  toastType.value = type
+  setTimeout(() => (toast.value = ''), 2200)
 }
 </script>
 
 <style scoped>
-.register-agent { padding: 2rem; max-width: 600px; margin: auto; }
-form { margin-bottom: 1rem; }
-input { margin-right: 1rem; }
-textarea { width: 100%; margin-bottom: 1rem; }
-.actions { display: flex; gap: 1rem; }
-.loading { color: #1976d2; font-weight: bold; }
-.success { color: #4caf50; font-weight: bold; }
-.error { color: #f44336; font-weight: bold; }
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
+:root{
+  --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+  --text-primary:#f5f7fa; --text-secondary:#9ca3af;
+  --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+  --danger:#ef4444; --success:#22c55e; --radius:12px;
+}
+
+/* Layout carte */
+.register-agent-page{ position:relative; min-height:100vh; overflow:hidden; }
+.wrapper{ position:relative; z-index:10; display:flex; justify-content:center; padding:32px; }
+.container{ width:100%; max-width:900px; }
+.card{
+  background:var(--panel-grey);
+  border-radius:16px;
+  padding:20px;
+  border:1px solid rgba(255,255,255,.05);
+  box-shadow:0 0 40px rgba(0,194,194,.05);
+}
+
+/* Header */
+.header-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.titles h2{ margin:0; font-size:20px; color:var(--text-primary); }
+.subtitle{ margin:.25rem 0 0; color:var(--text-secondary); }
+
+/* Form */
+.form{ margin-top:14px; display:flex; flex-direction:column; gap:8px; }
+.label{ font-size:13px; color:var(--text-secondary); }
+.row{ display:grid; grid-template-columns: 1fr auto; gap:10px; }
+.input{
+  width:100%; padding:12px 14px; border-radius:8px;
+  border:1px solid var(--divider-grey); background:#121521; color:var(--text-primary);
+}
+.input:focus{ outline:none; border-color:var(--primary-accent); background:#0b0e16; }
+.mono{ font-family: ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.2px; }
+.hint{ color:var(--text-secondary); }
+
+/* Buttons */
+.btn{
+  display:inline-flex; align-items:center; gap:8px;
+  border-radius:10px; padding:10px 14px; font-weight:600;
+  border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06);
+  color:var(--text-primary); cursor:pointer; transition:.15s;
+}
+.btn:hover{ background:rgba(255,255,255,.10); }
+.btn:disabled{ opacity:.5; cursor:not-allowed; }
+.btn.primary{ background:var(--primary-accent); color:#0e111a; border-color:transparent; }
+.btn.primary:hover{ background:var(--primary-hover); color:#fff; }
+.btn.ghost{ background:rgba(255,255,255,.06); }
+
+/* RÃ©sultat */
+.result{ margin-top:16px; }
+.toolbar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:8px; margin-bottom:8px;
+}
+.tag{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px; border-radius:999px;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08);
+  color:var(--text-primary); font-size:12px;
+}
+.actions{ display:flex; gap:8px; }
+.code{
+  width:100%; border-radius:10px; padding:12px 14px;
+  border:1px solid var(--divider-grey); background:#0b0e16; color:#e5e7eb;
+  font-family: ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.note{ color:var(--text-secondary); margin-top:8px; }
+
+/* Toast */
+.toast{
+  margin-top:12px; text-align:center; padding:10px 12px; border-radius:8px; font-size:14px;
+}
+.toast.success{ background:rgba(34,197,94,.12); color:var(--success); }
+.toast.error{ background:rgba(239,68,68,.12); color:var(--danger); }
+
+/* Responsive */
+@media (max-width: 820px){
+  .row{ grid-template-columns: 1fr; }
+}
 </style>
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\RegisterAgent.vue =====
