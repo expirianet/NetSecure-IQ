@@ -1,7 +1,7 @@
 <template>
   <div class="home-page">
     <!-- Canvas animé -->
-    <div id="particles-js"></div>
+    <div id="home-particles"></div>
 
     <!-- Contenu principal -->
     <div class="home-wrapper">
@@ -17,81 +17,31 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue';
+import { onMounted, onBeforeUnmount } from 'vue';
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
 
-/**
- * Initialise ou recharge particles.js en fonction du thème actuel.
- */
-function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-  // Supprime l'ancien canvas s'il existe
-  const old = document.querySelector('#particles-js > canvas');
-  if (old) old.remove();
+const ID = 'home-particles'
+let stopObs = () => {}
 
-  // (Re)initialise particlesJS
-  window.particlesJS('particles-js', {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#888888',
-        opacity: dark ? 0.4 : 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
-    retina_detect: true
-  });
+function render() {
+  return safeRender(ID, defaultConfig(themeIsDark()))
 }
 
-onMounted(() => {
-  // Charge le script particles.min.js s'il n'est pas déjà chargé
-  if (!window.particlesJS) {
-    const script = document.createElement('script');
-    script.src = '/particles/particles.min.js';
-    script.onload = () => {
-      renderParticles();
-      setupThemeObserver();
-    };
-    document.body.appendChild(script);
-  } else {
-    renderParticles();
-    setupThemeObserver();
-  }
-});
+onMounted(async () => {
+  try { await loadParticlesScript() } catch {}
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
 
-function setupThemeObserver() {
-  // Observe les changements de thème
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme') {
-        renderParticles();
-      }
-    }
-  });
-  
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  });
-}
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
 </script>
 
 <style scoped>
@@ -115,7 +65,7 @@ function setupThemeObserver() {
 }
 
 /* Canvas particles */
-#particles-js {
+#home-particles {
   position: fixed;
   top: 0;
   left: 0;
@@ -127,7 +77,7 @@ function setupThemeObserver() {
 }
 
 /* override light mode */
-[data-theme='light'] #particles-js {
+[data-theme='light'] #home-particles {
   background-color: #E0E0E0;
 }
 

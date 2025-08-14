@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- Fond animé derrière tout -->
-    <div id="particles-js"></div>
+    <div id="register-particles"></div>
 
     <!-- Contenu du register -->
     <div class="register-wrapper">
@@ -36,8 +36,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
 
 const email = ref('')
 const message = ref('')
@@ -45,90 +49,21 @@ const error = ref('')
 const loading = ref(false)
 const router = useRouter()
 
-/**
- * Initialise ou recharge particles.js en fonction du thème actuel.
- */
-function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  // supprime ancien canvas
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
+/* Particles */
+const ID = 'register-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
 
-  // (re)lance particlesJS
-  window.particlesJS('particles-js', {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: dark ? 0.5 : 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#888888',
-        opacity: dark ? 0.4 : 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
-    retina_detect: true
-  })
-}
-
-// Function to ensure particles are loaded after DOM and theme are ready
-async function initializeParticles() {
-  // Ensure the particles container exists
-  if (!document.getElementById('particles-js')) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-    return initializeParticles();
-  }
-  
-  // Load particles script if not already loaded
-  if (!window.particlesJS) {
-    await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/particles/particles.min.js';
-      script.onload = resolve;
-      document.body.appendChild(script);
-    });
-  }
-  
-  // Ensure theme is applied
-  await nextTick();
-  
-  // Initial render
-  renderParticles();
-  
-  // Set up theme change observer
-  const obs = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.attributeName === 'data-theme') {
-        renderParticles();
-      }
-    }
-  });
-
-  // Observe theme changes on document.documentElement
-  obs.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme']
-  });
-}
-
-onMounted(() => {
-  initializeParticles();
+onMounted(async () => {
+  try { await loadParticlesScript() } catch {}
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
 })
 
 const register = async () => {
@@ -172,7 +107,7 @@ const register = async () => {
 }
 
 /* Fond animé */
-#particles-js {
+#register-particles {
   position: fixed;
   top: 0;
   left: 0;
@@ -185,7 +120,7 @@ const register = async () => {
 }
 
 /* override light mode */
-[data-theme='light'] #particles-js {
+[data-theme='light'] #register-particles {
   background-color: #E0E0E0;
 }
 

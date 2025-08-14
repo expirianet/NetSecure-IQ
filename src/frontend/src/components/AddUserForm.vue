@@ -2,7 +2,7 @@
 <template>
   <div class="adduser-page">
     <!-- Particules -->
-    <div id="particles-js"></div>
+    <div id="adduser-particles"></div>
 
     <!-- Carte centrée -->
     <div class="adduser-wrapper">
@@ -163,7 +163,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
 
 /* Champs */
 const firstName = ref('')
@@ -236,63 +240,6 @@ function toggleShowPassword() {
   showPassword.value = !showPassword.value
 }
 
-/* ---- Particles ---- */
-function renderParticles() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-  const old = document.querySelector('#particles-js > canvas')
-  if (old) old.remove()
-  window.particlesJS('particles-js', {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#888888',
-        opacity: 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: {
-        repulse: { distance: 200 },
-        push: { particles_nb: 4 }
-      }
-    },
-    retina_detect: true
-  })
-}
-async function initializeParticles() {
-  if (!document.getElementById('particles-js')) {
-    await new Promise(r => setTimeout(r, 50))
-    return initializeParticles()
-  }
-  if (!window.particlesJS) {
-    await new Promise(resolve => {
-      const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
-      s.onload = resolve
-      document.body.appendChild(s)
-    })
-  }
-  await nextTick()
-  renderParticles()
-  const obs = new MutationObserver(m => {
-    if (m[0]?.attributeName === 'data-theme') renderParticles()
-  })
-  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-}
-
 /* ---- Data ---- */
 async function loadOrganizations() {
   if (!isAdmin.value) return
@@ -361,10 +308,25 @@ async function submitForm() {
   }
 }
 
-/* ---- Mount ---- */
-onMounted(() => {
-  initializeParticles()
+/* ---- Particles ---- */
+const ID = 'adduser-particles'
+let stopObs = () => {}
+function renderParticles() {
+  return safeRender(ID, defaultConfig(themeIsDark()))
+}
+
+onMounted(async () => {
+  try { await loadParticlesScript() } catch {}
+  ensurePJSDom()
+  renderParticles()
+  stopObs = observeTheme(ID, renderParticles)
   loadOrganizations()
+})
+
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
 })
 </script>
 
@@ -388,12 +350,12 @@ onMounted(() => {
 .adduser-page { position: relative; min-height: 100vh; overflow: hidden; }
 
 /* Particles */
-#particles-js {
+#adduser-particles {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   z-index: 0; background-color: var(--bg-dark);
   transition: background-color .3s ease; pointer-events: none;
 }
-[data-theme='light'] #particles-js { background-color: #E0E0E0; }
+[data-theme='light'] #adduser-particles { background-color: #E0E0E0; }
 
 /* Wrapper & card (même style que Login) */
 .adduser-wrapper {

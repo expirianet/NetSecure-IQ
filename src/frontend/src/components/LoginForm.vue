@@ -46,9 +46,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
 
 const email = ref('')
 const password = ref('')
@@ -58,113 +62,25 @@ const loading = ref(false)
 const router = useRouter()
 const { login: setAuthLogin } = useAuth()
 
-/* ------------------------------------------------------------------
-   Particles.js — sécurisation anti "Cannot read properties of null (push)"
-   - Toujours forcer window.pJSDom à être un tableau
-   - Détruire proprement l'instance rattachée au conteneur
--------------------------------------------------------------------*/
-function ensurePJSDom () {
-  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
-}
-function destroyLoginParticles () {
-  const el = document.getElementById('login-particles')
-  try {
-    if (!el) return
-    if (Array.isArray(window.pJSDom)) {
-      window.pJSDom = window.pJSDom.filter(entry => {
-        const same = entry?.pJS?.canvas?.el?.parentElement === el
-        if (same) {
-          try { entry.pJS.fn.vendors.destroypJS() } catch {}
-        }
-        return !same
-      })
-    }
-    el.querySelectorAll('canvas').forEach(c => c.remove())
-  } catch {}
-}
+/* Particles (sécurisé) */
+const ID = 'login-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
 
-/** (Re)rend le fond animé en respectant le thème */
-function renderParticles () {
-  const id = 'login-particles'
-  const el = document.getElementById(id)
-  if (!el || !window.particlesJS) return
-
+onMounted(async () => {
+  try { await loadParticlesScript() } catch {}
   ensurePJSDom()
-  destroyLoginParticles()
-
-  const dark =
-    document.documentElement.getAttribute('data-theme') === 'dark' ||
-    document.documentElement.classList.contains('dark')
-
-  window.particlesJS(id, {
-    particles: {
-      number: { value: 75, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: 0.5 },
-      size: { value: 3, random: true },
-      line_linked: {
-        enable: true,
-        distance: 150,
-        color: dark ? '#ffffff' : '#888888',
-        opacity: 0.4,
-        width: 1
-      },
-      move: { enable: true, speed: 4, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: {
-        onhover: { enable: true, mode: 'repulse' },
-        onclick: { enable: true, mode: 'push' },
-        resize: true
-      },
-      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
-    },
-    retina_detect: true
-  })
-}
-
-// S'assure que particles est chargé après le DOM et le thème
-async function initializeParticles () {
-  const id = 'login-particles'
-  if (!document.getElementById(id)) {
-    await new Promise(resolve => setTimeout(resolve, 50))
-    return initializeParticles()
-  }
-
-  if (!window.particlesJS) {
-    await new Promise((resolve) => {
-      const script = document.createElement('script')
-      script.src = '/particles/particles.min.js'
-      script.onload = resolve
-      document.body.appendChild(script)
-    })
-  }
-
-  ensurePJSDom()
-  await nextTick()
-  renderParticles()
-
-  // Re-render quand le thème change
-  const obs = new MutationObserver(muts => {
-    if (muts.some(m => m.attributeName === 'data-theme')) renderParticles()
-  })
-  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-}
-
-onMounted(() => {
-  initializeParticles()
+  render()
+  stopObs = observeTheme(ID, render)
 })
 
-onUnmounted(() => {
-  destroyLoginParticles()
-  ensurePJSDom() // ne jamais remettre window.pJSDom à null
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
 })
 
-/* ------------------------------------------------------------------
-   Auth
--------------------------------------------------------------------*/
+/* Auth */
 const login = async () => {
   loading.value = true
   try {

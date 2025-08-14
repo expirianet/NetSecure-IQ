@@ -1,4 +1,3 @@
-===== BEGIN: src/frontend/src/components/OrganizationForm.vue =====
 <template>
   <div class="login-page">
     <!-- Fond animé isolé pour le form -->
@@ -74,9 +73,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { API } from '@/utils/api.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
 
 const router = useRouter()
 const message = ref('')
@@ -84,94 +87,24 @@ const loading = ref(false)
 const successMessage = ref(false)
 const messageType = computed(() => (successMessage.value ? 'success' : 'error'))
 
-/* ---------- Particles (ID dédié + garde-fou pJSDom) ---------- */
+/* ---------- Particles (ID dédié + utilités robustes) ---------- */
 const CONTAINER_ID = 'org-form-particles'
-let themeObserver
+let stopObs = () => {}
+function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
 
-function ensurePJSDom() {
-  // 👉 corrige le crash "reading 'push' of null"
-  if (!Array.isArray(window.pJSDom)) window.pJSDom = []
-}
-
-function destroyFor(el) {
-  try {
-    if (!el) return
-    if (Array.isArray(window.pJSDom)) {
-      window.pJSDom = window.pJSDom.filter(entry => {
-        const same = entry?.pJS?.canvas?.el?.parentElement === el
-        if (same) { try { entry.pJS.fn.vendors.destroypJS() } catch {} }
-        return !same
-      })
-    }
-    el.querySelectorAll('canvas').forEach(c => c.remove())
-  } catch {}
-}
-
-function renderParticles() {
-  const el = document.getElementById(CONTAINER_ID)
-  if (!el || !window.particlesJS) return
+onMounted(async () => {
+  try { await loadParticlesScript() } catch {}
   ensurePJSDom()
-  destroyFor(el)
-
-  const dark =
-    document.documentElement.getAttribute('data-theme') === 'dark' ||
-    document.documentElement.classList.contains('dark')
-
-  window.particlesJS(CONTAINER_ID, {
-    particles: {
-      number: { value: 80, density: { enable: true, value_area: 800 } },
-      color: { value: dark ? '#ffffff' : '#555555' },
-      shape: { type: 'circle' },
-      opacity: { value: 0.5 },
-      size: { value: 3, random: true },
-      line_linked: { enable: true, distance: 150, color: dark ? '#ffffff' : '#888888', opacity: 0.4, width: 1 },
-      move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
-      modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
-    },
-    retina_detect: true
-  })
-}
-
-async function initializeParticles() {
-  // attendre que le conteneur existe
-  if (!document.getElementById(CONTAINER_ID)) {
-    await new Promise(r => setTimeout(r, 50))
-    return initializeParticles()
-  }
-  // charger le script si besoin
-  if (!window.particlesJS) {
-    await new Promise(resolve => {
-      const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
-      s.onload = resolve
-      document.body.appendChild(s)
-    })
-  }
-  ensurePJSDom()
-  await nextTick()
   renderParticles()
-
-  // re-render si le thème change
-  themeObserver = new MutationObserver(m => {
-    if (m.some(x => x.attributeName === 'data-theme' || x.attributeName === 'class')) {
-      ensurePJSDom()
-      renderParticles()
-    }
-  })
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
-}
-
-onMounted(() => { initializeParticles() })
-onUnmounted(() => {
-  themeObserver?.disconnect?.()
-  destroyFor(document.getElementById(CONTAINER_ID))
+  stopObs = observeTheme(CONTAINER_ID, renderParticles)
+})
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(CONTAINER_ID)
 })
 
-/* ---------- Données & Submit (inchangé) ---------- */
+/* ---------- Données & Submit ---------- */
 const form = reactive({
   name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
   email: '', pec_email: '', sdi: '', phone: '',
@@ -311,4 +244,3 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
   button { width: 100%; }
 }
 </style>
-===== END: src/frontend/src/components/OrganizationForm.vue =====
