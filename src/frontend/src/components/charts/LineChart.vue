@@ -1,77 +1,67 @@
 <template>
-  <div class="chart-container">
-    <canvas ref="chartCanvas"></canvas>
+  <div class="chart-root">
+    <canvas ref="canvas"></canvas>
   </div>
 </template>
 
-<script>
-import { ref, onMounted, watch } from 'vue';
-import Chart from 'chart.js/auto';
+<script setup>
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import Chart from 'chart.js/auto'
 
-export default {
-  name: 'LineChart',
-  props: {
-    chartData: {
-      type: Object,
-      required: true,
-      default: () => ({
-        labels: [],
-        datasets: []
-      })
-    },
-    options: {
-      type: Object,
-      default: () => ({
-        responsive: true,
-        maintainAspectRatio: false
-      })
-    }
-  },
-  setup(props) {
-    const chartCanvas = ref(null);
-    let chart = null;
+const props = defineProps({
+  chartData: { type: Object, required: true },
+  options: { type: Object, default: () => ({}) }
+})
 
-    const initChart = () => {
-      if (!chartCanvas.value) return;
-      
-      if (chart) {
-        chart.destroy();
-      }
-      
-      const ctx = chartCanvas.value.getContext('2d');
-      if (!ctx) return;
-      
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: props.chartData,
-        options: {
-          ...props.options,
-          responsive: true,
-          maintainAspectRatio: false,
-        },
-      });
-    };
+const canvas = ref(null)
+let chartInstance = null
 
-    onMounted(() => {
-      initChart();
-    });
-
-    watch(() => props.chartData, () => {
-      initChart();
-    }, { deep: true });
-
-    return {
-      chartCanvas
-    };
+function renderChart () {
+  if (!canvas.value) return
+  // Détruit l’instance précédente si elle existe
+  if (chartInstance) {
+    chartInstance.destroy()
+    chartInstance = null
   }
-};
+  const ctx = canvas.value.getContext('2d')
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: props.chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
+      scales: { x: { display: false }, y: { display: false } },
+      // Permet de surcharger via :options="..."
+      ...props.options
+    }
+  })
+}
+
+onMounted(renderChart)
+
+// Re-render si les props changent
+watch(() => props.chartData, renderChart, { deep: true })
+watch(() => props.options, renderChart, { deep: true })
+
+onBeforeUnmount(() => {
+  if (chartInstance) chartInstance.destroy()
+})
 </script>
 
 <style scoped>
-.chart-container {
+.chart-root {
   position: relative;
-  height: 100%;
-  min-height: 250px;
   width: 100%;
+  height: 100%;
+}
+canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  /* laisse les clics passer au parent si besoin */
+  pointer-events: none;
 }
 </style>

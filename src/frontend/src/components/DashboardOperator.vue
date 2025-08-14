@@ -1,287 +1,363 @@
 <template>
-    <div class="dashboard-page">
-      <!-- Particles Background -->
-      <div id="particles-js"></div>
+    <div class="opdash-page">
+      <BackgroundParticles />
   
-      <!-- Main Content -->
-      <div class="dashboard-wrapper">
-        <div class="dashboard-container">
-          <div class="dashboard-card">
-            <h1 class="dashboard-title">Dashboard</h1>
-  
-            <div class="dashboard-actions">
-              <!-- Router Info -->
-              <button class="dashboard-button" @click="goToRouterInfo">
-                <i class="fas fa-network-wired"></i>
-                Router Info
-              </button>
-  
-              <!-- Add User (si org) sinon lien vers Organisation -->
-              <button
-                v-if="hasOrganization"
-                class="dashboard-button"
-                @click="addUser"
-              >
-                <i class="fas fa-user-plus"></i>
-                Add User
-              </button>
-  
-              <button
-                v-else
-                class="dashboard-button"
-                @click="goToOrganizationInfo"
-              >
-                <i class="fas fa-building"></i>
-                Organization Info
-              </button>
+      <div class="opdash-wrapper">
+        <div class="opdash-shell">
+          <!-- En-tête -->
+          <header class="opdash-header">
+            <div class="title">
+              <h1>Operator Control</h1>
+              <p class="muted">Vue d’ensemble rapide et accès direct aux outils</p>
             </div>
-          </div>
+  
+            <div class="status-pill" v-if="hasOrganization">
+              <span class="dot"></span> org&nbsp;: <code>{{ orgId }}</code>
+            </div>
+          </header>
+  
+          <!-- Grille de mini-vues -->
+          <section class="grid">
+            <!-- RouterTable -->
+            <button class="tile" @click="go('/routertable')" aria-label="Ouvrir RouterTable">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-network-wired"></i></div>
+                <div class="labels">
+                  <h3>RouterTable</h3>
+                  <p class="muted">Résumé des statuts</p>
+                </div>
+              </div>
+  
+              <div class="row kpis">
+                <div class="kpi">
+                  <span class="kpi-val green">{{ routers.online }}</span>
+                  <span class="kpi-label">En ligne</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val red">{{ routers.offline }}</span>
+                  <span class="kpi-label">Hors ligne</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val amber">{{ routers.unknown }}</span>
+                  <span class="kpi-label">Inconnu</span>
+                </div>
+              </div>
+  
+              <div class="spark">
+                <LineChart :chartData="sparks.router" :options="sparkOpts" />
+              </div>
+  
+              <ul class="mini-list">
+                <li v-for="r in miniRouters" :key="r.mac">
+                  <span class="mono">{{ r.mac }}</span>
+                  <span :class="['badge', stateClass(r.status)]">{{ label(r.status) }}</span>
+                </li>
+              </ul>
+            </button>
+  
+            <!-- Organisation -->
+            <button class="tile" @click="go('/organization')" aria-label="Ouvrir Organisation">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-building"></i></div>
+                <div class="labels">
+                  <h3>Organisation</h3>
+                  <p class="muted">Profil & conformité</p>
+                </div>
+              </div>
+  
+              <div class="org-card">
+                <div class="org-row">
+                  <span class="hint">Nom</span>
+                  <span class="val">{{ orgName || '—' }}</span>
+                </div>
+                <div class="org-row">
+                  <span class="hint">Ville</span>
+                  <span class="val">{{ orgCity || '—' }}</span>
+                </div>
+                <div class="org-row">
+                  <span class="hint">Email</span>
+                  <span class="val">{{ orgEmail || '—' }}</span>
+                </div>
+              </div>
+  
+              <div class="cta">Ouvrir le profil</div>
+            </button>
+  
+            <!-- Add User -->
+            <button
+              class="tile"
+              :disabled="!hasOrganization"
+              @click="go('/adduser')"
+              aria-label="Ouvrir Add User"
+            >
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-user-plus"></i></div>
+                <div class="labels">
+                  <h3>Add User</h3>
+                  <p class="muted">Inviter un utilisateur</p>
+                </div>
+              </div>
+  
+              <div class="giant-number">
+                <span class="num">{{ recentUsers }}</span>
+                <span class="unit">ajouts récents</span>
+              </div>
+  
+              <div class="spark">
+                <LineChart :chartData="sparks.users" :options="sparkOpts" />
+              </div>
+  
+              <div v-if="!hasOrganization" class="warn">Rattachez d’abord l’organisation</div>
+              <div v-else class="cta">Créer un utilisateur</div>
+            </button>
+  
+            <!-- Agents -->
+            <button class="tile" @click="go('/agents')" aria-label="Ouvrir Agents">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-microchip"></i></div>
+                <div class="labels">
+                  <h3>Agents</h3>
+                  <p class="muted">MikroTik déployés</p>
+                </div>
+              </div>
+  
+              <div class="row kpis">
+                <div class="kpi">
+                  <span class="kpi-val green">{{ agents.associated }}</span>
+                  <span class="kpi-label">Associés</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val amber">{{ agents.unassociated }}</span>
+                  <span class="kpi-label">Non associés</span>
+                </div>
+                <div class="kpi">
+                  <span class="kpi-val red">{{ agents.deactivated }}</span>
+                  <span class="kpi-label">Désactivés</span>
+                </div>
+              </div>
+  
+              <div class="spark"><LineChart :chartData="sparks.agents" :options="sparkOpts" /></div>
+              <div class="cta">Gérer les agents</div>
+            </button>
+  
+            <!-- Pré-enregistrement Agent -->
+            <button class="tile" @click="go('/agents/register')" aria-label="Ouvrir Pré-enregistrement">
+              <div class="tile-head">
+                <div class="icon-wrap"><i class="fas fa-keyboard"></i></div>
+                <div class="labels">
+                  <h3>Pré-enregistrement Agent</h3>
+                  <p class="muted">Script Mikrotik .rsc</p>
+                </div>
+              </div>
+  
+              <div class="quick-form" @click.stop>
+                <input
+                  v-model="quickMac"
+                  class="mac-input mono"
+                  placeholder="AA:BB:CC:DD:EE:FF"
+                  @input="formatMac"
+                />
+                <button class="btn" :disabled="!macValid" @click="go('/agents/register')">
+                  Générer
+                </button>
+              </div>
+  
+              <div class="spark"><LineChart :chartData="sparks.wg" :options="sparkOpts" /></div>
+              <div class="cta">Ouvrir l’outil</div>
+            </button>
+          </section>
         </div>
       </div>
     </div>
   </template>
   
   <script setup>
-  import { computed, onMounted, nextTick } from 'vue'
+  import { ref, computed, onMounted } from 'vue'
   import { useRouter } from 'vue-router'
+  import BackgroundParticles from '@/components/BackgroundParticles.vue'
+  import LineChart from '@/components/charts/LineChart.vue'
   
   const router = useRouter()
+  const go = (p) => router.push(p)
   
-  /* ---------- Auth helpers ---------- */
-  function parseJwt(token) {
-    try {
-      const base64Url = token.split('.')[1]
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      )
-      return JSON.parse(jsonPayload)
-    } catch {
-      return null
-    }
-  }
-  function tokenValid() {
-    const t = localStorage.getItem('token') || ''
-    if (!t) return false
-    const payload = parseJwt(t)
-    if (!payload) return false
-    return !payload.exp || payload.exp * 1000 > Date.now()
-  }
+  /* --------- Contexte (org / role) --------- */
+  const orgId = ref(localStorage.getItem('organization_id') || '')
+  const hasOrganization = computed(() => !!String(orgId.value).trim())
   
-  /* ---------- Role / Org ---------- */
-  const role = computed(() => (localStorage.getItem('role') || '').toLowerCase())
-  const isOperator = computed(() => role.value === 'operator')
-  const hasOrganization = computed(() => {
-    const v = localStorage.getItem('organization_id') || ''
-    return !!String(v).trim()
+  // Lecture profil org depuis storage si existant (rempli par OrganizationForm)
+  const orgProfile = computed(() => {
+    try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') } catch { return null }
+  })
+  const orgName  = computed(() => orgProfile.value?.name)
+  const orgCity  = computed(() => orgProfile.value?.city)
+  const orgEmail = computed(() => orgProfile.value?.contact_email)
+  
+  /* --------- Données mini (démonstration locale) --------- */
+  const routers = ref({ online: 7, offline: 2, unknown: 1 })
+  const miniRouters = ref([
+    { mac: 'E4:8D:8C:AA:01:11', status: 'online'  },
+    { mac: '58:EF:68:02:7C:22', status: 'offline' },
+    { mac: 'C0:56:27:9A:33:44', status: 'unknown' }
+  ])
+  const agents = ref({ associated: 12, unassociated: 4, deactivated: 1 })
+  const recentUsers = ref(3)
+  
+  /* --------- Micro-charts (sparklines) --------- */
+  const labels = Array.from({ length: 16 }, (_, i) => i + 1)
+  function series(seed, jitter = 3) {
+    let v = seed
+    return labels.map(() => (v = Math.max(0, v + (Math.random() * jitter - jitter / 2))))
+  }
+  const sparkOpts = {
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
+    scales: { x: { display: false }, y: { display: false } }
+  }
+  const sparks = ref({
+    router: { labels, datasets: [{ data: series(6),      borderColor: '#22c55e' }] },
+    users:  { labels, datasets: [{ data: series(2, 2),   borderColor: '#60a5fa' }] },
+    agents: { labels, datasets: [{ data: series(5, 3),   borderColor: '#f59e0b' }] },
+    wg:     { labels, datasets: [{ data: series(4, 2.5), borderColor: '#00c2c2' }] }
   })
   
-  /* ---------- Navigation ---------- */
-  const goToRouterInfo = () => router.push('/routertable')
-  const addUser = () => router.push('/adduser')
-  const goToOrganizationInfo = () => router.push('/organization')
-  
-  /* ---------- Particles ---------- */
-  function renderParticles() {
-    const dark =
-      document.documentElement.getAttribute('data-theme') === 'dark' ||
-      document.documentElement.classList.contains('dark')
-  
-    const old = document.querySelector('#particles-js > canvas')
-    if (old) old.remove()
-  
-    const savedTheme = localStorage.getItem('theme')
-    const isDark = savedTheme ? savedTheme === 'dark' : dark
-  
-    if (window.particlesJS) {
-      window.particlesJS('particles-js', {
-        particles: {
-          number: { value: 80, density: { enable: true, value_area: 800 } },
-          color: { value: isDark ? '#ffffff' : '#555555' },
-          shape: { type: 'circle' },
-          opacity: { value: 0.5 },
-          size: { value: 3, random: true },
-          line_linked: {
-            enable: true,
-            distance: 150,
-            color: isDark ? '#ffffff' : '#888888',
-            opacity: 0.4,
-            width: 1
-          },
-          move: { enable: true, speed: 6, direction: 'none', out_mode: 'bounce' }
-        },
-        interactivity: {
-          detect_on: 'canvas',
-          events: {
-            onhover: { enable: true, mode: 'repulse' },
-            onclick: { enable: true, mode: 'push' },
-            resize: true
-          },
-          modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
-        },
-        retina_detect: true
-      })
-    }
+  /* --------- Mini helpers --------- */
+  const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
+  const quickMac = ref('')
+  const macValid = computed(() => macRe.test(quickMac.value))
+  function formatMac() {
+    let v = quickMac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
+    quickMac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
+  }
+  function label(s) {
+    return s === 'online' ? 'En ligne' : s === 'offline' ? 'Hors ligne' : 'Inconnu'
+  }
+  function stateClass(s) {
+    return s === 'online' ? 'green' : s === 'offline' ? 'red' : 'amber'
   }
   
-  async function initializeParticles() {
-    if (!document.getElementById('particles-js')) {
-      await new Promise(r => setTimeout(r, 50))
-      return initializeParticles()
-    }
-  
-    const savedTheme = localStorage.getItem('theme')
-    if (savedTheme) {
-      document.documentElement.setAttribute('data-theme', savedTheme)
-      if (savedTheme === 'dark') document.documentElement.classList.add('dark')
-      else document.documentElement.classList.remove('dark')
-    }
-  
-    if (!window.particlesJS) {
-      await new Promise(resolve => {
-        const script = document.createElement('script')
-        script.src = '/particles/particles.min.js'
-        script.onload = resolve
-        document.body.appendChild(script)
-      })
-    }
-  
-    await nextTick()
-    renderParticles()
-  
-    new MutationObserver(muts => {
-      for (const m of muts) {
-        if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
-          const old = document.querySelector('#particles-js > canvas')
-          if (old) old.remove()
-          renderParticles()
-        }
-      }
-    }).observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'class']
-    })
-  }
-  
-  /* ---------- Lifecycle ---------- */
+  /* --------- Légère animation des chiffres --------- */
   onMounted(() => {
-    // sécurité: accès réservé opérateur connecté
-    if (!tokenValid()) {
-      localStorage.clear()
-      router.replace('/login')
-      return
-    }
-    if (!isOperator.value) {
-      router.replace('/dashboard') // renvoyer les autres rôles vers le dashboard par défaut
-      return
-    }
-  
-    document.title = 'NetSecure-IQ - Operator Dashboard'
-    initializeParticles()
+    const iv = setInterval(() => {
+      routers.value.online  = Math.max(0, routers.value.online  + (Math.random() > .5 ? 1 : -1))
+      routers.value.offline = Math.max(0, routers.value.offline + (Math.random() > .7 ? 1 : -1))
+      sparks.value.router.datasets[0].data = series(6)
+      sparks.value.agents.datasets[0].data = series(5)
+      sparks.value.users.datasets[0].data  = series(2, 2)
+      sparks.value.wg.datasets[0].data     = series(4, 2.5)
+    }, 4000)
+    // Si navigation fréquente, décommente pour nettoyer :
+    // onUnmounted(() => clearInterval(iv))
   })
   </script>
   
   <style scoped>
-  .dashboard-page {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--background-color, #f5f7fa);
-    color: var(--text-color, #2c3e50);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+  
+  .opdash-page { position: relative; min-height: 100vh; }
+  .opdash-wrapper { position: relative; z-index: 1; display: flex; justify-content: center; padding: 28px; }
+  .opdash-shell {
+    width: 100%; max-width: 1200px;
+    background: var(--panel-grey);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 18px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+    padding: 22px;
   }
   
-  #particles-js {
-    position: fixed;
-    width: 100%;
-    height: 100%;
-    top: 0; left: 0;
-    z-index: 0;
+  /* Header */
+  .opdash-header { display:flex; align-items:center; justify-content:space-between; gap: 12px; margin-bottom: 14px; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .muted { color: var(--text-secondary); font-size: 13px; }
+  .status-pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 10px; border-radius:999px;
+    background: rgba(0,194,194,.10); border: 1px solid rgba(0,194,194,.25);
+    font-size: 12px;
   }
+  .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary-accent); }
   
-  .dashboard-wrapper {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-    position: relative;
-    z-index: 1;
-  }
-  
-  .dashboard-container { width: 100%; max-width: 1000px; margin: 0 auto; }
-  
-  .dashboard-card {
-    background-color: var(--panel-grey);
-    border-radius: 16px;
-    padding: 2.5rem;
-    box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-  }
-  
-  .dashboard-title {
-    text-align: center;
-    color: var(--text-color, #2c3e50);
-    margin-bottom: 2rem;
-    font-size: 2rem; font-weight: 600;
-  }
-  
-  .dashboard-actions {
+  /* Grid */
+  .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); /* 2 grosses tuiles */
-    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
   }
   
-  .dashboard-button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 1.5rem 1rem;
-    background-color: var(--button-bg, #f0f4f8);
-    color: var(--button-text, #2c3e50);
-    border: 1px solid var(--border-color, #e0e6ed);
-    border-radius: 12px;
-    font-size: 1rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    min-height: 110px;
+  /* Tile */
+  .tile {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; border-radius: 14px;
+    background: rgba(31,41,55,.55);
+    border: 1px solid rgba(255,255,255,.06);
+    cursor: pointer; text-align: left;
+    transition: transform .2s, box-shadow .2s, background .2s;
   }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.2); background: rgba(41,53,72,.55); }
+  .tile:disabled { opacity: .6; cursor: not-allowed; }
   
-  .dashboard-button i {
-    font-size: 1.75rem;
-    margin-bottom: 0.75rem;
-    color: var(--primary-color, #3b82f6);
+  .tile-head { display:flex; align-items:center; gap: 12px; }
+  .icon-wrap {
+    width: 38px; height: 38px; border-radius: 12px; display:grid; place-items:center;
+    background: rgba(0,194,194,.12); border:1px solid rgba(0,194,194,.22);
+    color: var(--primary-accent); flex: none;
   }
+  .icon-wrap i { font-size: 18px; }
+  .labels h3 { margin: 0; font-size: 15px; }
+  .labels p { margin: 0; }
   
-  .dashboard-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    background-color: var(--button-hover-bg, #e6edf5);
-  }
+  /* KPIs */
+  .row.kpis { display:flex; gap: 16px; }
+  .kpi { display:flex; flex-direction:column; gap:2px; }
+  .kpi-val { font-weight: 800; font-size: 18px; }
+  .kpi-val.green { color:#22c55e; }
+  .kpi-val.red { color:#ef4444; }
+  .kpi-val.amber { color:#f59e0b; }
+  .kpi-label { font-size: 11px; color: var(--text-secondary); }
   
-  /* Dark mode */
-  :global(.dark) .dashboard-card {
-    background-color: rgba(30, 41, 59, 0.7);
-    border-color: rgba(255, 255, 255, 0.1);
+  .spark { height: 64px; }
+  
+  /* Mini liste routeurs */
+  .mini-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .mini-list li { display:flex; align-items:center; justify-content:space-between; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .badge { padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .badge.green { background: rgba(34,197,94,.15); color: #22c55e; }
+  .badge.red { background: rgba(239,68,68,.15); color: #ef4444; }
+  .badge.amber { background: rgba(245,158,11,.15); color: #f59e0b; }
+  
+  /* Carte org */
+  .org-card { display:grid; gap:6px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:10px; background: rgba(12,16,24,.35); }
+  .org-row { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+  .org-row .hint { color: var(--text-secondary); font-size: 12px; }
+  .org-row .val { font-size: 13px; }
+  
+  /* Add User */
+  .giant-number { display:flex; align-items:baseline; gap:8px; margin-top: 2px; }
+  .giant-number .num { font-size: 28px; font-weight: 800; }
+  .giant-number .unit { font-size: 12px; color: var(--text-secondary); }
+  
+  /* Pré-enreg form */
+  .quick-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .mac-input {
+    border: 1px solid var(--divider-grey); background: #0b0e16; color: var(--text-primary);
+    border-radius: 8px; padding: 10px 12px; font-size: 13px;
   }
-  :global(.dark) .dashboard-button {
-    background-color: rgba(30, 41, 59, 0.7);
-    border-color: rgba(255, 255, 255, 0.1);
-    color: #e2e8f0;
+  .btn {
+    border: 1px solid rgba(0,194,194,.35);
+    background: rgba(0,194,194,.12); color: var(--primary-accent);
+    border-radius: 8px; font-weight: 700; padding: 10px 12px;
   }
-  :global(.dark) .dashboard-button:hover { background-color: rgba(41, 55, 78, 0.7); }
+  .btn:disabled { opacity: .5; }
+  
+  /* CTA */
+  .cta {
+    margin-top: auto;
+    display: inline-flex; align-items:center; gap: 8px;
+    color: var(--primary-accent); font-weight: 700; font-size: 13px;
+  }
+  .warn { margin-top: auto; color: #f59e0b; font-weight: 700; font-size: 13px; }
   
   /* Responsive */
-  @media (max-width: 768px) {
-    .dashboard-card { padding: 1.5rem; }
-    .dashboard-actions { grid-template-columns: 1fr; }
-  }
+  @media (max-width: 780px) { .opdash-wrapper { padding: 16px; } .opdash-shell { padding: 16px; } }
   </style>
   
