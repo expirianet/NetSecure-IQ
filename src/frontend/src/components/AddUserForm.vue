@@ -58,12 +58,7 @@
 
               <div class="field">
                 <label for="phone">Phone (optional)</label>
-                <input
-                  id="phone"
-                  v-model.trim="phone"
-                  type="tel"
-                  placeholder="+33 6 12 34 56 78"
-                />
+                <input id="phone" v-model.trim="phone" type="tel" placeholder="+33 6 12 34 56 78" />
               </div>
             </div>
 
@@ -120,9 +115,7 @@
               </div>
 
               <div class="field">
-                <label for="tempPass">
-                  Temporary password (optional)
-                </label>
+                <label for="tempPass">Temporary password (optional)</label>
                 <div class="pass-row">
                   <input
                     id="tempPass"
@@ -138,7 +131,6 @@
                   </button>
                 </div>
 
-                <!-- jauge -->
                 <div class="strength" v-if="tempPassword">
                   <div class="bar" :style="{ width: strengthPct + '%'}"></div>
                 </div>
@@ -164,56 +156,52 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { API } from '@/utils/api.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
 } from '@/utils/particles.js'
 
-/* Champs */
+/* ---------- Champs ---------- */
 const firstName = ref('')
-const lastName = ref('')
-const email = ref('')
-const phone = ref('')
+const lastName  = ref('')
+const email     = ref('')
+const phone     = ref('')
 
-/* Options */
-const sendInvite = ref(true)
+/* ---------- Options ---------- */
+const sendInvite   = ref(true)
 const requireReset = ref(true)
-const active = ref(true)
+const active       = ref(true)
 const tempPassword = ref('')
 const showPassword = ref(false)
 
-/* UI */
-const loading = ref(false)
-const message = ref('')
+/* ---------- UI ---------- */
+const loading        = ref(false)
+const message        = ref('')
 const successMessage = ref(false)
-const showErrors = ref(false)
+const showErrors     = ref(false)
 
-/* Contexte auth */
-const token = localStorage.getItem('token') || ''
-const role = (localStorage.getItem('role') || '').toLowerCase()
-const isAdmin = computed(() => role === 'administrator')
+/* ---------- Contexte auth ---------- */
+const token   = localStorage.getItem('token') || ''
+const roleStr = (localStorage.getItem('role') || '').toLowerCase()
+const isAdmin = computed(() => roleStr === 'administrator')
 const userOrgId = (localStorage.getItem('organization_id') || '').toString()
 
-/* Orgs */
+/* ---------- Orgs ---------- */
 const organizations = ref([])
-const selectedOrg = ref('')
+const selectedOrg   = ref('')
 
-/* ---- Validation ---- */
-const emailRe =
-  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i
-
+/* ---------- Validation ---------- */
+const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i
 const firstNameValid = computed(() => firstName.value.trim().length >= 2)
 const lastNameValid  = computed(() => lastName.value.trim().length >= 2)
 const emailValid     = computed(() => emailRe.test(email.value))
 const orgValid       = computed(() => (isAdmin.value ? !!selectedOrg.value : !!userOrgId))
 const formValid      = computed(() =>
-  firstNameValid.value &&
-  lastNameValid.value &&
-  emailValid.value &&
-  orgValid.value
+  firstNameValid.value && lastNameValid.value && emailValid.value && orgValid.value
 )
 
-/* ---- Password strength ---- */
+/* ---------- Password strength ---------- */
 function scorePassword(pw) {
   let score = 0
   if (!pw) return 0
@@ -231,36 +219,32 @@ const strengthLabel = computed(() => ['Very weak', 'Weak', 'Medium', 'Strong', '
 function generatePassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*?'
   let out = ''
-  for (let i = 0; i < 14; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)]
-  }
+  for (let i = 0; i < 14; i++) out += chars[Math.floor(Math.random() * chars.length)]
   tempPassword.value = out
 }
-function toggleShowPassword() {
-  showPassword.value = !showPassword.value
-}
+function toggleShowPassword() { showPassword.value = !showPassword.value }
 
-/* ---- Data ---- */
+/* ---------- Data ---------- */
 async function loadOrganizations() {
   if (!isAdmin.value) return
   try {
-    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/organizations`, {
-      headers: { Authorization: `Bearer ${token}` }
+    const res = await fetch(`${API}/api/organizations`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
     })
     const data = await res.json().catch(() => ({}))
     organizations.value = Array.isArray(data.organizations) ? data.organizations : []
-  } catch {
+  } catch (e) {
+    console.debug('[org] load failed', e)
     organizations.value = []
   }
 }
 
-/* ---- Submit ---- */
+/* ---------- Submit ---------- */
 async function submitForm() {
   showErrors.value = true
   if (!formValid.value) return
 
   const orgId = isAdmin.value ? String(selectedOrg.value) : String(userOrgId)
-
   const payload = {
     email: email.value,
     first_name: firstName.value,
@@ -279,11 +263,11 @@ async function submitForm() {
   successMessage.value = false
 
   try {
-    const res = await fetch(`${process.env.VUE_APP_BACKEND_URL}/api/users`, {
+    const res = await fetch(`${API}/api/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: JSON.stringify(payload)
     })
@@ -292,7 +276,7 @@ async function submitForm() {
 
     successMessage.value = true
     message.value = '✅ User created successfully.'
-    // Reset “soft”
+    // reset soft
     email.value = ''
     firstName.value = ''
     lastName.value = ''
@@ -308,15 +292,17 @@ async function submitForm() {
   }
 }
 
-/* ---- Particles ---- */
+/* ---------- Particles ---------- */
 const ID = 'adduser-particles'
 let stopObs = () => {}
-function renderParticles() {
-  return safeRender(ID, defaultConfig(themeIsDark()))
-}
+function renderParticles() { return safeRender(ID, defaultConfig(themeIsDark())) }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(ID, renderParticles)
@@ -346,10 +332,7 @@ onBeforeUnmount(() => {
   --radius: 12px;
 }
 
-/* Page */
 .adduser-page { position: relative; min-height: 100vh; overflow: hidden; }
-
-/* Particles */
 #adduser-particles {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   z-index: 0; background-color: var(--bg-dark);
@@ -357,14 +340,8 @@ onBeforeUnmount(() => {
 }
 [data-theme='light'] #adduser-particles { background-color: #f6f8fb; }
 
-
-/* Wrapper & card (même style que Login) */
-.adduser-wrapper {
-  position: relative; z-index: 10;
-  display: flex; align-items: center; justify-content: center;
-  padding: 32px; min-height: 100vh;
-}
-.adduser-container { width: 100%; max-width: 720px; } /* un peu plus large qu'un login */
+.adduser-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+.adduser-container { width: 100%; max-width: 720px; }
 .adduser-card {
   background-color: var(--panel-grey);
   border-radius: 16px; padding: 28px;
@@ -373,14 +350,9 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-/* En-têtes */
-.adduser-title {
-  text-align: center; font-size: 20px; font-weight: 600;
-  color: var(--primary-accent); margin-bottom: 6px;
-}
+.adduser-title { text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 6px; }
 .adduser-subtitle { text-align: center; font-size: 16px; margin-bottom: 20px; }
 
-/* Forme générale */
 .adduser-form { display: flex; flex-direction: column; gap: 16px; }
 .form-section {
   background-color: rgba(31,41,55,.35);
@@ -392,7 +364,6 @@ onBeforeUnmount(() => {
   font-size: 15px; font-weight: 600; display: flex; gap: 8px; align-items: center;
 }
 
-/* Champs */
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 label { font-size: 13px; color: var(--text-secondary); }
@@ -407,7 +378,6 @@ input:focus, select:focus { outline: none; border-color: var(--primary-accent); 
 .invalid { border-color: var(--danger)!important; }
 small { color: var(--danger); }
 
-/* Badges read-only */
 .readonly-pill {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 8px 10px; border-radius: 999px;
@@ -418,12 +388,10 @@ small { color: var(--danger); }
 .readonly-pill .dot.cyan { background: var(--primary-accent); }
 .readonly-pill code { opacity: .9; }
 
-/* Options */
 .options { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; }
 .checkbox { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 14px; }
 .checkbox input { width: 16px; height: 16px; }
 
-/* Password widgets */
 .pass-row { display: flex; gap: 8px; }
 .btn-ghost {
   background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
@@ -434,7 +402,6 @@ small { color: var(--danger); }
 .strength { margin-top: 8px; height: 6px; background: rgba(255,255,255,.08); border-radius: 6px; overflow: hidden; }
 .strength .bar { height: 100%; background: linear-gradient(90deg,#ff4d4d,#ffc107,#22c55e); }
 
-/* Submit */
 .submit {
   background-color: var(--primary-accent); color: var(--bg-dark);
   border: none; border-radius: 8px; font-weight: 700; padding: 12px 20px;
@@ -443,7 +410,6 @@ small { color: var(--danger); }
 .submit:hover { background-color: var(--primary-hover); color: #fff; }
 .submit:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
 
-/* Spinner minimal */
 .spinner {
   display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,.2);
   border-top-color: rgba(0,0,0,.6); border-radius: 50%; margin-right: 8px;
@@ -451,13 +417,9 @@ small { color: var(--danger); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Messages */
-.adduser-message {
-  margin-top: 10px; padding: 10px 12px; border-radius: 6px; text-align: center; font-size: 14px;
-}
+.adduser-message { margin-top: 10px; padding: 10px 12px; border-radius: 6px; text-align: center; font-size: 14px; }
 .adduser-message.success { background-color: rgba(34,197,94,.1); color: var(--success); }
 .adduser-message.error   { background-color: rgba(239,68,68,.1); color: var(--danger); }
 
-/* Responsive */
 @media (max-width: 760px) { .form-row { grid-template-columns: 1fr; } }
 </style>

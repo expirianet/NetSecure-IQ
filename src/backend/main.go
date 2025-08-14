@@ -146,8 +146,13 @@ func main() {
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
-	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8081"
+	}
+	addr := ":" + port
+	fmt.Printf("\n\n🚀 Server started at http://localhost%s (even if DB is down)\n", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
