@@ -94,18 +94,18 @@ export function ensurePJSDom() {
     return {
       particles: {
         number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: dark ? '#ffffff' : '#555555' },
+        color: { value: dark ? '#ffffff' : '#334155' },      // slate-700 en light
         shape: { type: 'circle' },
-        opacity: { value: dark ? 0.5 : 0.4 },
+        opacity: { value: dark ? 0.5 : 0.55 },               // un poil plus visible en light
         size: { value: 3, random: true },
         line_linked: {
           enable: true,
           distance: 150,
-          color: dark ? '#ffffff' : '#888888',
-          opacity: dark ? 0.4 : 0.35,
+          color: dark ? '#ffffff' : '#475569',               // slate-600 en light
+          opacity: dark ? 0.4 : 0.45,
           width: 1
         },
-        move: { enable: true, speed: 4, direction: 'none', out_mode: 'bounce' }
+        move: { enable: true, speed: 3.6, direction: 'none', out_mode: 'bounce' }
       },
       interactivity: {
         detect_on: 'canvas',
@@ -115,4 +115,5 @@ export function ensurePJSDom() {
       retina_detect: true
     }
   }
+  
   

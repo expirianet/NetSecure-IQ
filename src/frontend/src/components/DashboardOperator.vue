@@ -260,7 +260,9 @@
     background: var(--panel-grey);
     border: 1px solid rgba(255,255,255,.06);
     border-radius: 18px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+
+box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+
     padding: 22px;
   }
   
@@ -361,3 +363,56 @@
   @media (max-width: 780px) { .opdash-wrapper { padding: 16px; } .opdash-shell { padding: 16px; } }
   </style>
   
+  <style>
+/* --- LIGHT THEME OVERRIDES (n'affecte pas le dark) --- */
+
+[data-theme='light'] .opdash-shell {
+  background: #fff !important;
+  border-color: var(--panel-border) !important;
+  box-shadow: var(--panel-shadow) !important;
+}
+
+/* cartes/tiles plus claires */
+[data-theme='light'] .tile {
+  background: #ffffff !important;
+  border-color: var(--panel-border) !important;
+  box-shadow: 0 4px 12px rgba(2,6,23,0.06) !important;
+}
+[data-theme='light'] .tile:hover {
+  background: #f9fafb !important;
+  box-shadow: 0 8px 20px rgba(2,6,23,0.08) !important;
+}
+
+/* puce d’icône (teal doux) */
+[data-theme='light'] .icon-wrap {
+  background: rgba(14,165,165,0.10) !important;         /* teal-600 à 10% */
+  border-color: rgba(14,165,165,0.28) !important;
+  color: var(--primary-accent) !important;
+}
+
+/* carte “Organisation” dans une surface neutre */
+[data-theme='light'] .org-card {
+  background: var(--muted-surface) !important;
+  border-color: var(--panel-border) !important;
+}
+
+/* pills/cta lisibles sur fond clair */
+[data-theme='light'] .status-pill {
+  background: rgba(14,165,165,0.10) !important;
+  border-color: rgba(14,165,165,0.28) !important;
+  color: var(--text-primary) !important;
+}
+[data-theme='light'] .cta { color: var(--primary-accent) !important; }
+
+/* mini formulaire MAC */
+[data-theme='light'] .mac-input {
+  background: #ffffff !important;
+  color: #0f172a !important;               /* slate-900 */
+  border-color: #e5e7eb !important;        /* gray-200 */
+}
+
+/* badges état : même couleurs mais opacité adaptée au fond blanc */
+[data-theme='light'] .badge.green { background: rgba(34,197,94,.12) !important; color:#16a34a !important; }
+[data-theme='light'] .badge.red   { background: rgba(239,68,68,.12) !important; color:#dc2626 !important; }
+[data-theme='light'] .badge.amber { background: rgba(245,158,11,.12) !important; color:#d97706 !important; }
+</style>
