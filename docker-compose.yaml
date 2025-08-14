@@ -79,7 +79,7 @@ services:
       - "55300:55300/udp"
       - "9090:9090" # instead of 9090:9090
     volumes:
-      - ./src/wireguard_config:/config-output
+      - ./src/wireguard_config:/config
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
 

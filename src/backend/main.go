@@ -919,16 +919,34 @@ func listRouters() ([]MikroTikRow, error) {
 	return out, nil
 }
 
-// Add/remove peer inside the WireGuard container
+// Add/remove peer inside the WireGuard container and persist to config file
 func addWireGuardPeer(publicKey, ip string) error {
+	// 1) Apply live (keeps current session working)
 	cmd := exec.Command("docker", "exec", wgContainer,
 		"wg", "set", "wg0",
 		"peer", publicKey,
 		"allowed-ips", ip+"/32")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("wg add peer failed: %v\nOutput: %s", err, string(out))
 	}
+
+	// 2) Persist to /config/wg0.conf with real newlines (avoid adding duplicates)
+	script := fmt.Sprintf(`
+if ! grep -q "PublicKey = %s" /config/wg_confs/wg0.conf; then
+  cat <<'EOF' >> /config/wg_confs/wg0.conf
+
+[Peer]
+PublicKey = %s
+AllowedIPs = %s/32
+EOF
+fi
+`, publicKey, publicKey, ip)
+
+	appendCmd := exec.Command("docker", "exec", wgContainer, "sh", "-c", script)
+	if out, err := appendCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to append peer to /config/wg_confs/wg0.conf: %v\nOutput: %s", err, string(out))
+	}
+
 	return nil
 }
 
