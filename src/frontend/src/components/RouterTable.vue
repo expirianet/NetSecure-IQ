@@ -6,23 +6,23 @@
     <div class="wrapper">
       <div class="container">
         <div class="card">
-          <!-- En-tête très simple -->
+          <!-- Simple header -->
           <div class="header-row">
             <h2>Router Status Table</h2>
             <button class="btn ghost" @click="loadRouters" :disabled="loading">
               <i class="fas fa-rotate"></i>
-              <span>{{ loading ? 'Chargement…' : 'Rafraîchir' }}</span>
+              <span>{{ loading ? 'Loading…' : 'Refresh' }}</span>
             </button>
           </div>
 
-          <!-- Tableau -->
+          <!-- Table -->
           <div class="table-wrapper">
-            <table v-if="routers.length" class="routers-table" aria-label="Etat des routeurs">
+            <table v-if="routers.length" class="routers-table" aria-label="Router status">
               <thead>
                 <tr>
                   <th>MAC Address</th>
-                  <th>Statut</th>
-                  <th>Dernier contact</th>
+                  <th>Status</th>
+                  <th>Last Contact</th>
                 </tr>
               </thead>
               <tbody>
@@ -61,7 +61,7 @@ function normalize(entry) {
   }
 }
 function label(s) {
-  return s === 'online' ? 'En ligne' : s === 'offline' ? 'Hors ligne' : 'Inconnu'
+  return s === 'online' ? 'Online' : s === 'offline' ? 'Offline' : 'Unknown'
 }
 function stateClass(s) {
   return s === 'online' ? 'green' : s === 'offline' ? 'red' : 'orange'
@@ -79,18 +79,18 @@ async function loadRouters() {
       headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
     }).catch(() => null)
 
-    if (!res || !res.ok) throw new Error('Affichage de données fictives (API indisponible).')
+    if (!res || !res.ok) throw new Error('Showing demo data (API unavailable).')
     const raw = await res.json()
     const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
     routers.value = list.map(normalize)
   } catch (e) {
-    // Données FR fictives pour démo
+    // Demo data for display
     routers.value = [
       { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
       { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
       { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
     ]
-    error.value = e.message || 'Erreur inconnue.'
+    error.value = e.message || 'Unknown error.'
   } finally {
     loading.value = false
   }
@@ -109,7 +109,7 @@ onMounted(loadRouters)
   --danger:#ef4444; --success:#22c55e;
 }
 
-/* Layout carte */
+/* Card layout */
 .routers-page { position:relative; min-height:100vh; overflow:hidden; }
 .wrapper { position:relative; z-index:10; display:flex; justify-content:center; padding:32px; }
 .container { width:100%; max-width:1000px; }
@@ -125,7 +125,7 @@ onMounted(loadRouters)
 .header-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .header-row h2 { margin:0; font-size:20px; color:var(--text-primary); }
 
-/* Boutons */
+/* Buttons */
 .btn {
   display:inline-flex; align-items:center; gap:8px;
   border-radius:10px; padding:10px 14px; font-weight:600;
@@ -147,7 +147,7 @@ onMounted(loadRouters)
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.2px; }
 .empty { text-align:center; color:var(--text-secondary); padding:18px; }
 
-/* Badges d’état */
+/* Status badges */
 .state { display:inline-block; padding:6px 10px; border-radius:999px; font-weight:600; font-size:12px; }
 .state.green  { background:rgba(22,163,74,.15); color:#22c55e; }
 .state.red    { background:rgba(239,68,68,.15); color:#f87171; }

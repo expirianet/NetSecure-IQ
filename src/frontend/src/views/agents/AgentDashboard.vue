@@ -1,7 +1,7 @@
-<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
+﻿<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
 <template>
   <div class="agents-page">
-    <!-- Particules de fond -->
+    <!-- Background particles -->
     <BackgroundParticles />
 
     <div class="agents-wrapper">
@@ -10,56 +10,56 @@
           <!-- Header -->
           <div class="header-row">
             <div class="titles">
-              <h2>Gestion des agents MikroTik</h2>
-              <p class="subtitle">Surveillez, associez et gérez vos routeurs déployés.</p>
+              <h2>MikroTik Agent Management</h2>
+              <p class="subtitle">Monitor, associate, and manage your deployed routers.</p>
             </div>
 
             <RouterLink to="/agents/register" class="btn primary">
               <i class="fas fa-microchip"></i>
-              <span>Pré-enregistrer un agent</span>
+              <span>Pre-register an Agent</span>
             </RouterLink>
           </div>
 
-          <!-- Barre outils -->
+          <!-- Toolbar -->
           <div class="toolbar">
             <div class="search">
               <i class="fas fa-search"></i>
               <input
                 v-model.trim="query"
                 type="text"
-                placeholder="Rechercher par MAC, organisation ou site"
-                aria-label="Rechercher"
+                placeholder="Search by MAC, organization, or site"
+                aria-label="Search"
               />
             </div>
 
             <div class="actions">
               <button class="btn ghost" :disabled="!selectedAgent" @click="onAssociate">
-                <i class="fas fa-link"></i><span>Associer</span>
+                <i class="fas fa-link"></i><span>Associate</span>
               </button>
               <button class="btn ghost" :disabled="!selectedAgent" @click="onDeactivate">
-                <i class="fas fa-ban"></i><span>Désactiver</span>
+                <i class="fas fa-ban"></i><span>Deactivate</span>
               </button>
               <button class="btn ghost danger" :disabled="!selectedAgent" @click="onDelete">
-                <i class="fas fa-trash"></i><span>Supprimer</span>
+                <i class="fas fa-trash"></i><span>Delete</span>
               </button>
             </div>
 
             <div class="legend">
-              <span class="chip green"><span class="dot"></span>Associé</span>
-              <span class="chip orange"><span class="dot"></span>Non associé</span>
-              <span class="chip red"><span class="dot"></span>Désactivé</span>
+              <span class="chip green"><span class="dot"></span>Associated</span>
+              <span class="chip orange"><span class="dot"></span>Unassociated</span>
+              <span class="chip red"><span class="dot"></span>Deactivated</span>
             </div>
           </div>
 
-          <!-- Tableau -->
+          <!-- Table -->
           <div class="table-wrapper">
-            <table class="agents-table" role="table" aria-label="Liste des agents">
+            <table class="agents-table" role="table" aria-label="Agent list">
               <thead>
                 <tr>
-                  <th style="width:72px">Sélection</th>
-                  <th>MAC Adresse</th>
-                  <th style="width:170px">Statut</th>
-                  <th>Organisation</th>
+                  <th style="width:72px">Select</th>
+                  <th>MAC Address</th>
+                  <th style="width:170px">Status</th>
+                  <th>Organization</th>
                   <th>Site</th>
                 </tr>
               </thead>
@@ -73,7 +73,7 @@
                 >
                   <td>
                     <span class="radio" :class="{ checked: idx === selectedIndex }" aria-hidden="true"></span>
-                    <span class="sr-only">Sélectionner {{ a.mac }}</span>
+                    <span class="sr-only">Select {{ a.mac }}</span>
                   </td>
                   <td class="mono">{{ a.mac }}</td>
                   <td>
@@ -84,7 +84,7 @@
                 </tr>
 
                 <tr v-if="!filteredAgents.length">
-                  <td colspan="5" class="empty">Aucun agent ne correspond à la recherche.</td>
+                  <td colspan="5" class="empty">No agents match your search.</td>
                 </tr>
               </tbody>
             </table>
@@ -102,14 +102,14 @@
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
 import { ref, computed } from 'vue'
 
-/** Données de démonstration (branche sur ton API quand dispo) */
+/** Demo data (wire to your API when available) */
 const agents = ref([
   { mac: 'AA:BB:CC:DD:EE:01', status: 'associated',   organization: 'Org1', site: 'SiteA' },
   { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated', organization: '',     site: ''     },
   { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated',  organization: 'Org2', site: ''     }
 ])
 
-/** Recherche & sélection */
+/** Search & selection */
 const query = ref('')
 const selectedAgent = ref(null)
 const selectedIndex = ref(-1)
@@ -141,28 +141,28 @@ const showToast = (msg, type = 'success') => {
 function onAssociate() {
   if (!selectedAgent.value) return
   selectedAgent.value.status = 'associated'
-  showToast('Agent associé.')
+  showToast('Agent associated.')
 }
 function onDeactivate() {
   if (!selectedAgent.value) return
   selectedAgent.value.status = 'deactivated'
-  showToast('Agent désactivé.', 'error')
+  showToast('Agent deactivated.', 'error')
 }
 function onDelete() {
   if (!selectedAgent.value) return
   agents.value = agents.value.filter((_, i) => i !== selectedIndex.value)
   selectedAgent.value = null
   selectedIndex.value = -1
-  showToast('Agent supprimé.', 'error')
+  showToast('Agent deleted.', 'error')
 }
 
-/** Helpers d’affichage */
+/** Display helpers */
 function label(status) {
   return status === 'associated'
-    ? 'Associé'
+    ? 'Associated'
     : status === 'unassociated'
-    ? 'Non associé'
-    : 'Désactivé'
+    ? 'Unassociated'
+    : 'Deactivated'
 }
 function stateClass(status) {
   return status === 'associated'
@@ -196,7 +196,7 @@ function rowTint(status) {
   --radius: 12px;
 }
 
-/* Layout de page */
+/* Page layout */
 .agents-page { position: relative; min-height: 100vh; overflow: hidden; }
 .agents-wrapper { position: relative; z-index: 10; display: flex; justify-content: center; padding: 32px; }
 .agents-container { width: 100%; max-width: 1120px; }
@@ -270,17 +270,17 @@ function rowTint(status) {
 .row:hover { outline: 1px solid rgba(255,255,255,.08); }
 .selected { outline: 2px solid rgba(0,194,194,.35); }
 
-/* Teinte de ligne selon statut (subtile) */
+/* Subtle row tint by status */
 .tint-green  { background: rgba(22,163,74,.06); }
 .tint-orange { background: rgba(245,158,11,.06); }
 .tint-red    { background: rgba(239,68,68,.06); }
 
-/* Radio custom */
+/* Custom radio */
 .radio { display:inline-block; width:12px; height:12px; border-radius:50%;
   border:2px solid rgba(255,255,255,.35); vertical-align: middle; margin-right: 6px; }
 .radio.checked { background: var(--primary-accent); border-color: var(--primary-accent); }
 
-/* Badges état */
+/* Status badges */
 .state {
   display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: 600; font-size: 12px;
 }
@@ -288,7 +288,7 @@ function rowTint(status) {
 .state.orange { background: rgba(245,158,11,.15); color:#fbbf24; }
 .state.red    { background: rgba(239,68,68,.15); color:#f87171; }
 
-/* Vide */
+/* Empty state */
 .empty { text-align: center; color: var(--text-secondary); padding: 20px; }
 
 /* Toast */

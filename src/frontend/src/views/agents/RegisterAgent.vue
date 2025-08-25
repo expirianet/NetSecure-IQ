@@ -1,4 +1,4 @@
-<!-- src/frontend/src/views/agents/RegisterAgent.vue -->
+﻿<!-- src/frontend/src/views/agents/RegisterAgent.vue -->
 <template>
   <div class="register-agent-page">
     <BackgroundParticles />
@@ -9,20 +9,20 @@
           <!-- Header -->
           <div class="header-row">
             <div class="titles">
-              <h2>Pré-enregistrement d’un agent MikroTik</h2>
+              <h2>MikroTik Agent Pre-registration</h2>
               <p class="subtitle">
-                Saisis l’adresse MAC (ether1), puis génère le script <code>.rsc</code> à exécuter sur le routeur.
+                Enter the primary MAC address (ether1), then generate the <code>.rsc</code> script to run on the router.
               </p>
             </div>
 
             <button v-if="script" class="btn ghost" @click="resetAll">
-              <i class="fas fa-eraser"></i><span>Réinitialiser</span>
+              <i class="fas fa-eraser"></i><span>Reset</span>
             </button>
           </div>
 
-          <!-- Formulaire compact -->
+          <!-- Compact form -->
           <form class="form" @submit.prevent="onGenerate">
-            <label for="mac" class="label">Adresse MAC principale (ether1)</label>
+            <label for="mac" class="label">Primary MAC address (ether1)</label>
 
             <div class="row">
               <input
@@ -36,28 +36,28 @@
               />
               <button class="btn primary" type="submit" :disabled="loading || !macValid">
                 <i class="fas fa-microchip"></i>
-                <span>{{ loading ? 'Génération…' : 'Générer le script' }}</span>
+                <span>{{ loading ? 'Generating…' : 'Generate Script' }}</span>
               </button>
             </div>
 
-            <small class="hint">Format attendu : 6 octets hexadécimaux séparés par « : ».</small>
+            <small class="hint">Expected format: 6 hexadecimal bytes separated by ":"</small>
           </form>
 
-          <!-- Résultat -->
+          <!-- Result -->
           <div v-if="script" class="result">
             <div class="toolbar">
               <span class="tag">
                 <i class="fas fa-file-code"></i> script.rsc
               </span>
               <div class="actions">
-                <button class="btn ghost" @click="copyScript"><i class="fas fa-copy"></i><span>Copier</span></button>
-                <button class="btn ghost" @click="downloadScript"><i class="fas fa-download"></i><span>Télécharger</span></button>
+                <button class="btn ghost" @click="copyScript"><i class="fas fa-copy"></i><span>Copy</span></button>
+                <button class="btn ghost" @click="downloadScript"><i class="fas fa-download"></i><span>Download</span></button>
               </div>
             </div>
 
             <textarea class="code" readonly rows="12" :value="script"></textarea>
             <p class="note">
-              Applique le script via <em>Files → Run Script</em> ou en CLI sur le routeur.
+              Apply the script via <em>Files → Run Script</em> or through the router CLI.
             </p>
           </div>
 
@@ -82,34 +82,34 @@ const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
 const macValid = computed(() => macRe.test(mac.value))
 
 function formatMac() {
-  // Uppercase + auto-insertion des ":" (AA:BB:…)
+  // Uppercase + auto-insert ":" (AA:BB:…)
   let v = mac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
   mac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
 }
 
 function makeDummyScript(macAddr) {
-  // Génère un script Mikrotik plausible (démo locale)
+  // Generate a plausible MikroTik script (local demo)
   const last = macAddr.split(':').pop() || 'FF'
   const ipOctet = parseInt(last, 16) || Math.floor(Math.random() * 200) + 10
   return `
-# MikroTik WireGuard onboarding script (démo)
+# MikroTik WireGuard onboarding script (demo)
 # MAC: ${macAddr}
-# Exécuter : /import file=script.rsc
+# Run: /import file=script.rsc
 
 /interface wireguard add name=wg0 listen-port=51820 private-key="CHANGEME_PRIVATE"
 /ip address add address=10.10.10.${ipOctet}/32 interface=wg0
 
-# Pair serveur (à ajuster)
-/interface wireguard peers add \
-  interface=wg0 \
-  public-key="SERVER_PUBLIC_KEY" \
-  endpoint-address=vpn.example.com \
-  endpoint-port=51820 \
-  allowed-address=0.0.0.0/0 \
+# Server peer (adjust as needed)
+/interface wireguard peers add \\
+  interface=wg0 \\
+  public-key="SERVER_PUBLIC_KEY" \\
+  endpoint-address=vpn.example.com \\
+  endpoint-port=51820 \\
+  allowed-address=0.0.0.0/0 \\
   persistent-keepalive=25s
 
-# Tag local
-:put "Agent pré-enregistré (${macAddr})"
+# Local tag
+:put "Pre-registered Agent (${macAddr})"
 `.trim()
 }
 
@@ -118,12 +118,12 @@ async function onGenerate() {
   loading.value = true
   script.value = ''
   try {
-    // Ici on pourrait appeler un vrai endpoint backend si dispo.
-    // Pour le moment, on génère un script local « démo » cohérent.
+    // Here you could call a real backend endpoint if available.
+    // For now, we generate a consistent local "demo" script.
     await new Promise(r => setTimeout(r, 500))
     script.value = makeDummyScript(mac.value)
   } catch (e) {
-    showToast('Erreur pendant la génération.', 'error')
+    showToast('Error while generating.', 'error')
   } finally {
     loading.value = false
   }
@@ -131,7 +131,7 @@ async function onGenerate() {
 
 function copyScript() {
   navigator.clipboard.writeText(script.value)
-  showToast('Script copié dans le presse-papiers.')
+  showToast('Script copied to clipboard.')
 }
 function downloadScript() {
   const blob = new Blob([script.value], { type: 'text/plain' })
@@ -162,7 +162,7 @@ function showToast(msg, type = 'success') {
   --danger:#ef4444; --success:#22c55e; --radius:12px;
 }
 
-/* Layout carte */
+/* Card layout */
 .register-agent-page{ position:relative; min-height:100vh; overflow:hidden; }
 .wrapper{ position:relative; z-index:10; display:flex; justify-content:center; padding:32px; }
 .container{ width:100%; max-width:900px; }
@@ -204,7 +204,7 @@ function showToast(msg, type = 'success') {
 .btn.primary:hover{ background:var(--primary-hover); color:#fff; }
 .btn.ghost{ background:rgba(255,255,255,.06); }
 
-/* Résultat */
+/* Result */
 .result{ margin-top:16px; }
 .toolbar{
   display:flex; align-items:center; justify-content:space-between;

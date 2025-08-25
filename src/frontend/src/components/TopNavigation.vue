@@ -1,43 +1,43 @@
-<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
+﻿<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
 <template>
   <nav class="navbar">
-    <!-- Left side: Brand and navigation links -->
+    <!-- Left: brand + nav links -->
     <div class="nav-left">
       <router-link to="/" class="brand">NetSecure-IQ</router-link>
       <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
 
-      <!-- non connecté -->
+      <!-- Not authenticated -->
       <template v-if="!isAuthenticated">
         <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
         <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
       </template>
 
-      <!-- connecté (ADMIN) -->
+      <!-- Authenticated (ADMIN) -->
       <template v-else>
         <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
-        <router-link to="/organizationForm" class="nav-link" :class="{ active: $route.path === '/organizationForm' }">Organisation</router-link>
+        <router-link to="/organization" class="nav-link" :class="{ active: $route.path === '/organization' }">Organization</router-link>
         <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
         <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
         <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
         <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
         <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
-          Pré-enregistrement Agent
+          Agent Pre-Registration
         </router-link>
         <button @click="logout" class="nav-link">Logout</button>
       </template>
     </div>
 
-    <!-- Right side: role badge + Theme toggle -->
+    <!-- Right: role badge + theme toggle -->
     <div class="nav-right">
-      <div v-if="isAuthenticated" class="role-badge" title="Vous êtes connecté en tant qu'administrateur">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as administrator">
         <span class="dot online" aria-hidden="true"></span>
-        <span class="role-text">Admin connecté</span>
+        <span class="role-text">Admin signed in</span>
         <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
       </div>
 
-      <button 
-        class="theme-toggle" 
-        @click="toggleTheme" 
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
         <span v-if="isDark">☀️</span>
@@ -53,7 +53,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
 
-/** Organisation: reactive via localStorage + events */
+/** Organization: reactive via localStorage + events */
 const organizationId = ref(localStorage.getItem('organization_id') || '')
 const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
 function syncOrgId() {
@@ -92,14 +92,12 @@ onUnmounted(() => {
   --success: #22c55e;
 }
 
-/* Navbar styles */
+/* Navbar */
 .navbar {
-  position: fixed;
-  top: 0; left: 0; right: 0;
+  position: fixed; top: 0; left: 0; right: 0;
   z-index: 1000;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px;
-  height: 64px;
+  padding: 0 32px; height: 64px;
   background-color: var(--bg-dark);
   border-bottom: 1px solid var(--divider-grey);
   transition: background-color 0.3s ease;
@@ -109,13 +107,12 @@ onUnmounted(() => {
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
-/* Left side */
+/* Left */
 .nav-left { display: flex; align-items: center; gap: 24px; }
 .brand {
   font-weight: bold; font-size: 18px;
   color: var(--primary-accent);
   text-decoration: none;
-  transition: color 0.2s ease;
 }
 .brand:hover { color: var(--primary-hover); }
 
@@ -127,7 +124,7 @@ onUnmounted(() => {
   border-radius: 4px;
   transition: all 0.2s ease;
   background: transparent;
-  border: none; /* pour le bouton Logout */
+  border: none;
   cursor: pointer;
 }
 .nav-link:hover,
@@ -137,27 +134,21 @@ onUnmounted(() => {
 }
 .nav-link.active { font-weight: 600; }
 
-/* Right side */
+/* Right */
 .nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
 
-/* Role badge */
 .role-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.25);
-  color: var(--text-primary);
-  font-size: 12px;
+  color: var(--text-primary); font-size: 12px;
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.online { background: var(--success); }
 .role-text { font-weight: 600; }
 .org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-/* Theme toggle */
 .theme-toggle {
   background: none; border: none;
   color: var(--text-secondary);
@@ -170,7 +161,5 @@ onUnmounted(() => {
   background-color: var(--divider-grey);
   color: var(--text-primary);
 }
-[data-theme='light'] .theme-toggle:hover {
-  background-color: rgba(0,0,0,0.05);
-}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
 </style>
