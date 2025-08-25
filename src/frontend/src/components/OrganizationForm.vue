@@ -1,3 +1,4 @@
+
 <template>
   <div class="login-page">
     <!-- Fond animé isolé pour le form -->
@@ -93,10 +94,15 @@ let stopObs = () => {}
 function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try { await loadParticlesScript() }
+  catch (e) { console.debug('[particles] load failed (non-blocking)', e) }
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(CONTAINER_ID, renderParticles)
+
+  // pré-remplissage : d'abord localStorage, puis API
+  preloadFromLocal()
+  await preloadFromAPI()
 })
 onBeforeUnmount(() => {
   stopObs?.()
@@ -104,7 +110,8 @@ onBeforeUnmount(() => {
   destroyForId(CONTAINER_ID)
 })
 
-/* ---------- Données & Submit ---------- */
+/* ---------- État + helpers ---------- */
+const orgId = ref('') // conservé pour l'update
 const form = reactive({
   name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
   email: '', pec_email: '', sdi: '', phone: '',
@@ -116,8 +123,69 @@ const form = reactive({
 
 const goToDashboard = () => router.push('/dashboard')
 
-const submitForm = async () => {
-  const personnelInfo = `
+function safe(v) { return (v ?? '').toString().trim() }
+function assignIf(key, v) { if (safe(v)) form[key] = v }
+
+/* ---------- Pré-chargement LOCAL ---------- */
+function readLocalProfile() {
+  try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
+  catch (e) { console.debug('[org] local read failed', e); return null }
+}
+function preloadFromLocal() {
+  const p = readLocalProfile()
+  if (!p) return
+  if (p.id) orgId.value = String(p.id)
+
+  // champs d'orga
+  assignIf('name',        p.name)
+  assignIf('vat_number',  p.vat_number)
+  assignIf('address',     p.address)
+  assignIf('city',        p.city)
+  assignIf('state',       p.state)
+  assignIf('zip_code',    p.zip_code)
+  assignIf('email',       p.contact_email || p.email)
+  assignIf('phone',       p.contact_phone || p.phone)
+  assignIf('pec_email',   p.pec_email)
+  assignIf('sdi',         p.sdi_code || p.sdi)
+
+  // responsables (local only)
+  if (p.manager)   { assignIf('manager_name',   p.manager.name);   assignIf('manager_email',   p.manager.email);   assignIf('manager_phone',   p.manager.phone) }
+  if (p.technical) { assignIf('technical_name', p.technical.name); assignIf('technical_email', p.technical.email); assignIf('technical_phone', p.technical.phone) }
+  if (p.controller){ assignIf('controller_name',p.controller.name);assignIf('controller_email',p.controller.email);assignIf('controller_phone', p.controller.phone) }
+  if (p.processor) { assignIf('processor_name', p.processor.name); assignIf('processor_email', p.processor.email); assignIf('processor_phone', p.processor.phone) }
+}
+
+/* ---------- Pré-chargement API ---------- */
+async function preloadFromAPI() {
+  const token = localStorage.getItem('token') || ''
+  if (!token) return
+  try {
+    const res = await fetch(`${API}/api/complete-organization`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    })
+    if (!res.ok) return
+    const data = await res.json().catch(() => ({}))
+    if (!data || !Object.keys(data).length) return
+
+    if (data.id) orgId.value = String(data.id)
+    assignIf('name',       data.name)
+    assignIf('vat_number', data.vat_number)
+    assignIf('address',    data.address)
+    assignIf('city',       data.city)
+    assignIf('state',      data.state)
+    assignIf('zip_code',   data.zip_code)
+    assignIf('email',      data.contact_email)
+    assignIf('phone',      data.contact_phone)
+    assignIf('pec_email',  data.pec_email)
+    assignIf('sdi',        data.sdi_code)
+
+    persistLocal()
+  } catch (e) { console.debug('[org] preloadFromAPI skipped', e) }
+}
+
+/* ---------- Construit le personnel_info (texte) ---------- */
+function buildPersonnelInfo() {
+  return `
 Company Manager:
   Name: ${form.manager_name}
   Email: ${form.manager_email}
@@ -138,21 +206,33 @@ Data Processor:
   Email: ${form.processor_email}
   Phone: ${form.processor_phone}
 `.trim()
+}
 
-  const stored = {
+/* ---------- Persistance locale unifiée ---------- */
+function asStoredObject() {
+  return {
+    id: orgId.value || undefined,
     name: form.name, vat_number: form.vat_number, address: form.address,
     city: form.city, state: form.state, zip_code: form.zip_code,
     contact_email: form.email, contact_phone: form.phone,
     pec_email: form.pec_email, sdi_code: form.sdi,
-    personnel_info: personnelInfo,
-    manager:   { name: form.manager_name,    email: form.manager_email,    phone: form.manager_phone },
-    technical: { name: form.technical_name,  email: form.technical_email,  phone: form.technical_phone },
-    controller:{ name: form.controller_name, email: form.controller_email, phone: form.controller_phone },
-    processor: { name: form.processor_name,  email: form.processor_email,  phone: form.processor_phone },
+    personnel_info: buildPersonnelInfo(),
+    manager:   { name: form.manager_name,   email: form.manager_email,   phone: form.manager_phone },
+    technical: { name: form.technical_name, email: form.technical_email, phone: form.technical_phone },
+    controller:{ name: form.controller_name,email: form.controller_email,phone: form.controller_phone },
+    processor: { name: form.processor_name, email: form.processor_email, phone: form.processor_phone },
   }
-  localStorage.setItem('organization_profile', JSON.stringify(stored))
+}
+function persistLocal() {
+  localStorage.setItem('organization_profile', JSON.stringify(asStoredObject()))
+}
+
+/* ---------- Submit ---------- */
+const submitForm = async () => {
+  const personnelInfo = buildPersonnelInfo()
 
   const payload = {
+    id: orgId.value || undefined,
     name: form.name, vat_number: form.vat_number, address: form.address,
     state: form.state, city: form.city, zip_code: form.zip_code,
     contact_email: form.email, pec_email: form.pec_email, sdi_code: form.sdi,
@@ -170,13 +250,20 @@ Data Processor:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
-    }).catch(() => null)
+    })
 
-    if (res && res.ok) { await res.text().catch(() => '') }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed')
+
+    if (data?.organization?.id) orgId.value = String(data.organization.id)
+
+    persistLocal()
+
     successMessage.value = true
     message.value = 'Organization info saved.'
     setTimeout(() => router.push('/organization'), 400)
-  } catch {
+  } catch (e) {
+    persistLocal()
     successMessage.value = true
     message.value = 'Organization info saved locally.'
     setTimeout(() => router.push('/organization'), 400)
@@ -198,13 +285,11 @@ Data Processor:
 
 .login-page { position: relative; min-height: 100vh; overflow: hidden; background-color: var(--bg-dark); }
 
-/* Conteneur animé dédié */
 #org-form-particles {
   position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0;
   background-color: var(--bg-dark); pointer-events: none; transition: background-color .3s;
 }
 [data-theme='light'] #org-form-particles { background-color: #f6f8fb; }
-
 
 .login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
 .login-container { width: 100%; max-width: 800px; }
@@ -245,3 +330,4 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
   button { width: 100%; }
 }
 </style>
+
