@@ -951,16 +951,110 @@ fi
 }
 
 func removeWireGuardPeer(publicKey string) error {
-	cmd := exec.Command("docker", "exec", wgContainer,
-		"wg", "set", "wg0",
-		"peer", publicKey,
-		"remove")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("wg remove peer failed: %v\nOutput: %s", err, string(out))
+	cfgPath := "/config/wg_confs/wg0.conf" // same path you use in addWireGuardPeer
+
+	// 0) Show live peers before
+	{
+		cmd := exec.Command("docker", "exec", wgContainer, "wg", "show", "wg0", "peers")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			fmt.Printf("DEBUG: live peers BEFORE removal:\n%s\n", string(out))
+		} else {
+			fmt.Printf("DEBUG: failed to list live peers before removal: %v\nOutput: %s\n", err, string(out))
+		}
 	}
+
+	// 1) Remove from live session (chatty)
+	{
+		cmd := exec.Command("docker", "exec", wgContainer,
+			"wg", "set", "wg0", "peer", publicKey, "remove")
+		out, err := cmd.CombinedOutput()
+		fmt.Printf("DEBUG: wg remove output:\n%s\n", string(out))
+		if err != nil {
+			return fmt.Errorf("wg remove peer failed: %v\nOutput: %s", err, string(out))
+		}
+	}
+
+	// 2) Remove from persisted config with diagnostics + backup
+	script := fmt.Sprintf(`
+set -e
+
+CFG="%s"
+PUB="%s"
+TS="$(date +%%s)"
+BAK="${CFG}.bak.${TS}"
+
+# Show occurrences before
+echo "== BEFORE: grep PublicKey with line numbers ==" >&2
+if [ -f "$CFG" ]; then
+  nl -ba "$CFG" | grep -n "PublicKey" || true
+else
+  echo "Config file not found: $CFG" >&2
+fi
+
+# Backup
+cp "$CFG" "$BAK"
+echo "Backup created at: $BAK" >&2
+
+# Remove the peer block containing the exact PublicKey (no assumptions about blank lines)
+# Strategy: buffer each block; if a [Peer] block contains the key, drop it; print everything else.
+awk -v key="$PUB" '
+function flush() {
+  if (buf_len > 0) {
+    if (keep) {
+      for (i=1;i<=buf_len;i++) print buf[i];
+    }
+    delete buf; buf_len=0; keep=1; inpeer=0;
+  }
+}
+BEGIN { buf_len=0; keep=1; inpeer=0 }
+/^\[Peer\]/ { flush(); inpeer=1 } 
+{
+  buf[++buf_len]=$0
+  # Detect exact key on a line like: PublicKey = <key> (with arbitrary spaces)
+  if ($0 ~ /^[[:space:]]*PublicKey[[:space:]]*=/) {
+    line=$0
+    sub(/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+    if (line == key) { keep=0 }  # mark this block for deletion
+  }
+}
+END { flush() }
+' "$CFG" > "${CFG}.tmp"
+
+mv "${CFG}.tmp" "$CFG"
+
+# Show occurrences after
+echo "== AFTER: grep PublicKey with line numbers ==" >&2
+nl -ba "$CFG" | grep -n "PublicKey" || true
+
+# Show diff if available
+if command -v diff >/dev/null 2>&1; then
+  echo "== DIFF (backup vs new) ==" >&2
+  diff -u "$BAK" "$CFG" || true
+fi
+
+`, cfgPath, publicKey)
+
+	removeCmd := exec.Command("docker", "exec", wgContainer, "sh", "-c", script)
+	if out, err := removeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove peer from %s: %v\nOutput:\n%s", cfgPath, err, string(out))
+	} else {
+		fmt.Printf("DEBUG: config update script output:\n%s\n", string(out))
+	}
+
+	// 3) Show live peers after
+	{
+		cmd := exec.Command("docker", "exec", wgContainer, "wg", "show", "wg0", "peers")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			fmt.Printf("DEBUG: live peers AFTER removal:\n%s\n", string(out))
+		} else {
+			fmt.Printf("DEBUG: failed to list live peers after removal: %v\nOutput: %s\n", err, string(out))
+		}
+	}
+
 	return nil
 }
+
 
 // Ping from inside WireGuard container to the router's internal IP
 func pingFromWireGuard(ip string) error {
