@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/expirianet/NetSecure-IQ/backend/middleware"
+	middleware "src/backend/middleware"
 )
 
 type AuthMeSitePerm struct {
@@ -34,7 +34,10 @@ type AuthMeResponse struct {
 func HandleAuthMe(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		uid := middleware.GetUserID(r)
-		if uid == "" { http.Error(w, "unauthorized", http.StatusUnauthorized); return }
+		if uid == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		var u AuthMeUser
 		if err := db.QueryRow(`
@@ -60,7 +63,9 @@ func HandleAuthMe(db *sql.DB) http.HandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var n string
-				if err := rows.Scan(&n); err == nil { perms = append(perms, n) }
+				if err := rows.Scan(&n); err == nil {
+					perms = append(perms, n)
+				}
 			}
 		}
 
