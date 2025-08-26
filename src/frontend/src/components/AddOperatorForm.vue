@@ -1,3 +1,4 @@
+
 <template>
   <div class="add-operator-page">
     <h2>Add New Operator</h2>
@@ -18,7 +19,7 @@
         <input v-model="lastName" type="text" required />
       </div>
 
-      <button type="submit">Add Operator</button>
+      <button type="submit" :disabled="loading">Add Operator</button>
       <p v-if="message">{{ message }}</p>
     </form>
   </div>
@@ -26,36 +27,54 @@
 
 <script setup>
 import { ref } from 'vue'
-import jwtDecode from 'jwt-decode'
 import { API } from '@/utils/api.js'
 
-const email = ref(''); const firstName = ref(''); const lastName = ref(''); const message = ref('')
+const email = ref('')
+const firstName = ref('')
+const lastName = ref('')
+const message = ref('')
+const loading = ref(false)
 
 const submitForm = async () => {
+  loading.value = true
+  message.value = ''
   try {
     const token = localStorage.getItem('token') || ''
-    const decoded = token ? jwtDecode(token) : {}
-    const organization_id = decoded?.organization_id
+    // Le back ne met pas organization_id dans le JWT.
+    // On le récupère de la réponse /api/login sauvegardée en localStorage.
+    const orgId = localStorage.getItem('organization_id') || ''
 
     const payload = {
-      email: email.value, first_name: firstName.value, last_name: lastName.value, role: 'operator',
-      ...(organization_id ? { organization_id: String(organization_id) } : {})
+      email: email.value,
+      first_name: firstName.value,
+      last_name: lastName.value,
+      role: 'operator',
+      ...(orgId ? { organization_id: String(orgId) } : {}) // optionnel si vide
     }
 
     const res = await fetch(`${API}/api/users`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: 'Bearer ' + token } : {})
+      },
       body: JSON.stringify(payload)
     })
     const data = await res.json().catch(() => ({}))
-    message.value = res.ok ? '✅ Operator created successfully!' : '❌ Failed: ' + (data.error || data.message)
+    if (!res.ok) {
+      throw new Error(data.error || data.message || 'Request failed')
+    }
+    message.value = '✅ Operator created successfully!'
+    email.value = ''
+    firstName.value = ''
+    lastName.value = ''
   } catch (err) {
-    message.value = '❌ Internal error: ' + err.message
+    message.value = '❌ Failed: ' + (err.message || 'Unknown error')
+  } finally {
+    loading.value = false
   }
 }
 </script>
-
-
 
 <style scoped>
 .add-operator-page {
@@ -98,3 +117,4 @@ const submitForm = async () => {
   margin-top: 0.5rem;
 }
 </style>
+

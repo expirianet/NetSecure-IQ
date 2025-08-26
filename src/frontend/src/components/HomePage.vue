@@ -31,7 +31,9 @@ function render() {
 }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try { await loadParticlesScript() } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
   ensurePJSDom()
   render()
   stopObs = observeTheme(ID, render)
