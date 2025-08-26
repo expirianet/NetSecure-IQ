@@ -1,3 +1,4 @@
+
 <!-- src/frontend/src/components/AddUserForm.vue -->
 <template>
   <div class="adduser-page">
@@ -66,25 +67,22 @@
             <div class="form-section">
               <h4><i class="fas fa-building"></i> Organization</h4>
 
-              <div v-if="isAdmin" class="field">
-                <label for="org">Select organization</label>
-                <select
-                  id="org"
-                  v-model="selectedOrg"
-                  :class="{ invalid: showErrors && !orgValid }"
-                  required
-                >
-                  <option disabled value="">Select organization…</option>
-                  <option v-for="org in organizations" :key="org.id" :value="org.id">
-                    {{ org.name }}
-                  </option>
-                </select>
-                <small v-if="showErrors && !orgValid">Organization is required.</small>
-              </div>
-
-              <div v-else class="readonly-pill" title="Taken from your session">
+              <!-- Operator : org imposée depuis la session -->
+              <div v-if="isOperator" class="readonly-pill" title="Taken from your session">
                 <span class="dot"></span>
                 Using your organization: <code>{{ userOrgId || '—' }}</code>
+              </div>
+
+              <!-- Admin : pas d’endpoint de liste => champ optionnel -->
+              <div v-if="isAdmin" class="field">
+                <label for="orgIdManual">Organization ID (optional)</label>
+                <input
+                  id="orgIdManual"
+                  v-model.trim="orgIdManual"
+                  type="text"
+                  placeholder="UUID… (leave empty to create user without org)"
+                />
+                <small class="hint">No organization list endpoint available. You can paste a UUID or leave empty.</small>
               </div>
 
               <div class="readonly-pill" title="Role is fixed for this screen">
@@ -184,20 +182,25 @@ const showErrors     = ref(false)
 /* ---------- Contexte auth ---------- */
 const token   = localStorage.getItem('token') || ''
 const roleStr = (localStorage.getItem('role') || '').toLowerCase()
-const isAdmin = computed(() => roleStr === 'administrator')
-const userOrgId = (localStorage.getItem('organization_id') || '').toString()
+const isAdmin    = computed(() => roleStr === 'administrator')
+const isOperator = computed(() => roleStr === 'operator')
+const userOrgId  = (localStorage.getItem('organization_id') || '').toString()
 
-/* ---------- Orgs ---------- */
-const organizations = ref([])
-const selectedOrg   = ref('')
+/* ---------- Admin: org manuelle optionnelle ---------- */
+const orgIdManual = ref('')
 
 /* ---------- Validation ---------- */
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i
 const firstNameValid = computed(() => firstName.value.trim().length >= 2)
 const lastNameValid  = computed(() => lastName.value.trim().length >= 2)
 const emailValid     = computed(() => emailRe.test(email.value))
-const orgValid       = computed(() => (isAdmin.value ? !!selectedOrg.value : !!userOrgId))
-const formValid      = computed(() =>
+
+// orgValid :
+// - operator -> doit avoir une org en session
+// - admin    -> champ optionnel (toujours true)
+const orgValid = computed(() => (isOperator.value ? !!userOrgId : true))
+
+const formValid = computed(() =>
   firstNameValid.value && lastNameValid.value && emailValid.value && orgValid.value
 )
 
@@ -224,34 +227,24 @@ function generatePassword() {
 }
 function toggleShowPassword() { showPassword.value = !showPassword.value }
 
-/* ---------- Data ---------- */
-async function loadOrganizations() {
-  if (!isAdmin.value) return
-  try {
-    const res = await fetch(`${API}/api/organizations`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-    const data = await res.json().catch(() => ({}))
-    organizations.value = Array.isArray(data.organizations) ? data.organizations : []
-  } catch (e) {
-    console.debug('[org] load failed', e)
-    organizations.value = []
-  }
-}
-
 /* ---------- Submit ---------- */
 async function submitForm() {
   showErrors.value = true
   if (!formValid.value) return
 
-  const orgId = isAdmin.value ? String(selectedOrg.value) : String(userOrgId)
+  // Détermine l’orgId selon le rôle
+  const resolvedOrgId = isOperator.value
+    ? String(userOrgId || '')
+    : String(orgIdManual.value || '')
+
   const payload = {
     email: email.value,
     first_name: firstName.value,
     last_name: lastName.value,
-    phone: phone.value || undefined,
+    phone: phone.value || undefined, // ignoré par le back actuel (sans impact)
     role: 'user',
-    organization_id: orgId,
+    ...(resolvedOrgId ? { organization_id: resolvedOrgId } : {}),
+    // options purement front pour l’instant (le back les ignore sans erreur)
     send_invite: sendInvite.value,
     require_password_reset: requireReset.value,
     active: active.value,
@@ -282,7 +275,7 @@ async function submitForm() {
     lastName.value = ''
     phone.value = ''
     tempPassword.value = ''
-    if (isAdmin.value) selectedOrg.value = ''
+    if (isAdmin.value) orgIdManual.value = ''
     showErrors.value = false
   } catch (err) {
     successMessage.value = false
@@ -306,7 +299,6 @@ onMounted(async () => {
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(ID, renderParticles)
-  loadOrganizations()
 })
 
 onBeforeUnmount(() => {
@@ -377,6 +369,7 @@ input::placeholder { color: var(--text-secondary); }
 input:focus, select:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
 .invalid { border-color: var(--danger)!important; }
 small { color: var(--danger); }
+small.hint { color: var(--text-secondary); }
 
 .readonly-pill {
   display: inline-flex; align-items: center; gap: 8px;
@@ -423,3 +416,4 @@ small { color: var(--danger); }
 
 @media (max-width: 760px) { .form-row { grid-template-columns: 1fr; } }
 </style>
+

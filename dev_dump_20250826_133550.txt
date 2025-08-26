@@ -1,511 +1,616 @@
-﻿===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\cmd\api\main.go =====
-package main
+﻿===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\agents.go =====
+package handlers
 
 import (
-	"log"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
-	"backend/internal/handlers"
-	"backend/internal/repository"
+	middleware "src/backend/middleware"
+	wireguard "src/backend/wireguard"
 )
 
-func main() {
-	// Env
-	dsn := getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/netsecure?sslmode=disable")
-	secret := []byte(getenv("JWT_SECRET", "devsecret"))
-	addr := getenv("ADDR", ":8081")
-
-	// DB
-	repo, err := repository.NewPostgres(dsn)
-	if err != nil {
-		log.Fatal("db connect:", err)
-	}
-	defer repo.Close()
-
-	// Handlers
-	auth := handlers.NewAuthHandler(repo, secret)
-	org := handlers.NewOrganizationHandler(secret)
-
-	// Router
-	mux := http.NewServeMux()
-
-	// Auth
-	mux.HandleFunc("/api/auth/login", auth.Login)
-	mux.HandleFunc("/api/login", auth.Login) // alias pour l'ancien front
-	mux.HandleFunc("/api/auth/me", auth.Me)
-
-	// Organization (GET/POST)
-	mux.HandleFunc("/api/complete-organization", org.CompleteOrganization)
-
-	// Server
-	srv := &http.Server{
-		Addr:              addr,
-		// CORS GLOBAL + logging (le CORS s'applique Ã  toutes les routes et mÃªmes aux 404/500)
-		Handler:           corsMiddleware(logRequests(mux)),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	log.Println("API listening on", addr)
-	log.Fatal(srv.ListenAndServe())
+type AgentRow struct {
+	ID              string     `json:"id"`
+	OrganizationID  *string    `json:"organization_id,omitempty"`
+	SiteID          *string    `json:"site_id,omitempty"`
+	MacAddress      string     `json:"mac_address"`
+	VPNInternalIP   *string    `json:"vpn_internal_ip,omitempty"`
+	WireGuardPublic *string    `json:"wireguard_public_key,omitempty"`
+	Provisioning    string     `json:"provisioning_status"`
+	IsActive        bool       `json:"is_active"`
+	LastOnlineAt    *time.Time `json:"last_online_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	SiteName        *string    `json:"site_name,omitempty"`
 }
 
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
+func HandleListAgents(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		role := middleware.GetRoleName(r)
+		userOrg := middleware.GetOrgID(r)
+
+		query := `
+		SELECT a.id, a.organization_id, a.site_id, a.mac_address, a.vpn_internal_ip,
+		       a.wireguard_public_key, a.provisioning_status, a.is_active, a.last_online_at,
+		       a.created_at, a.updated_at, s.name as site_name
+		  FROM agents a
+		  LEFT JOIN sites s ON s.id = a.site_id
+		`
+		args := []interface{}{}
+		if role == "Admin" {
+			// no where
+		} else if role == "Operator" {
+			query += ` WHERE a.organization_id = $1`
+			args = append(args, userOrg)
+		} else {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		query += ` ORDER BY a.created_at DESC`
+
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		out := []AgentRow{}
+		for rows.Next() {
+			var a AgentRow
+			err := rows.Scan(&a.ID, &a.OrganizationID, &a.SiteID, &a.MacAddress, &a.VPNInternalIP,
+				&a.WireGuardPublic, &a.Provisioning, &a.IsActive, &a.LastOnlineAt, &a.CreatedAt, &a.UpdatedAt, &a.SiteName)
+			if err == nil {
+				out = append(out, a)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
 	}
-	return def
 }
 
-// -------- CORS global, compatible prÃ©flight --------
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
+func HandlePreRegisterAgent(db *sql.DB) http.HandlerFunc {
+	type reqBody struct {
+		MacAddress     string  `json:"mac_address"`
+		OrganizationID *string `json:"organization_id,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST", http.StatusMethodNotAllowed)
+			return
 		}
-		// Autorise l'origine appelante (au lieu de '*', pour Ã©viter certains blocages navigateurs)
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-
-		reqHdrs := r.Header.Get("Access-Control-Request-Headers")
-		if strings.TrimSpace(reqHdrs) == "" {
-			reqHdrs = "Authorization, Content-Type"
+		role := middleware.GetRoleName(r)
+		userOrg := middleware.GetOrgID(r)
+		var body reqBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MacAddress == "" {
+			http.Error(w, "Invalid body", http.StatusBadRequest)
+			return
 		}
-		w.Header().Set("Access-Control-Allow-Headers", reqHdrs)
-
-		// PrÃ©flight : renvoyer tout de suite
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		if role == "Operator" {
+			// operator peut prÃ©ciser org_id mais doit matcher le sien
+			if body.OrganizationID != nil && *body.OrganizationID != userOrg {
+				http.Error(w, "Cross-tenant operation forbidden", http.StatusForbidden)
+				return
+			}
+			body.OrganizationID = &userOrg
+		} else if role != "Admin" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 
-		next.ServeHTTP(w, r)
-	})
+		// already exists?
+		var exists bool
+		_ = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM agents WHERE mac_address=$1)`, strings.ToLower(body.MacAddress)).Scan(&exists)
+		if exists {
+			http.Error(w, "Agent already exists", http.StatusConflict)
+			return
+		}
+
+		priv, pub, err := wireguard.GenerateKeyPair()
+		if err != nil {
+			http.Error(w, "WG keygen failed", http.StatusInternalServerError)
+			return
+		}
+		ip := wireguard.ReserveVPNIP() // simple helper "10.10.10.X/32"
+
+		var id string
+		err = db.QueryRow(`
+			INSERT INTO agents (organization_id, mac_address, vpn_internal_ip,
+				wireguard_public_key, wireguard_private_key, provisioning_status, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, 'UNASSOCIATED', now(), now())
+			RETURNING id
+		`, body.OrganizationID, strings.ToLower(body.MacAddress), ip, pub, priv).Scan(&id)
+		if err != nil {
+			http.Error(w, "DB insert: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		script := wireguard.GenerateMikrotikScript(priv, ip)
+		resp := map[string]interface{}{
+			"id":              id,
+			"mac_address":     strings.ToLower(body.MacAddress),
+			"vpn_internal_ip": ip,
+			"script":          script,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }
 
-// Logging minimal
-func logRequests(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		h.ServeHTTP(w, r)
-		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start))
-	})
+func HandleAgentActions(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+		parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
+		if len(parts) < 1 || parts[0] == "" {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		id := parts[0]
+		action := ""
+		if len(parts) >= 2 {
+			action = parts[1]
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			switch action {
+			case "associate":
+				handleAssociate(db, id, w, r)
+				return
+			case "deactivate":
+				handleDeactivate(db, id, w, r)
+				return
+			case "test":
+				handleTest(db, id, w, r)
+				return
+			default:
+				http.Error(w, "Not found", http.StatusNotFound)
+				return
+			}
+		case http.MethodDelete:
+			handleDelete(db, id, w, r)
+			return
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}
 }
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\cmd\api\main.go =====
+func handleAssociate(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
+	role := middleware.GetRoleName(r)
+	userOrg := middleware.GetOrgID(r)
+	var body struct {
+		SiteID string `json:"site_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SiteID == "" {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+	// scope check
+	if role == "Operator" {
+		var orgID string
+		if err := db.QueryRow(`SELECT organization_id FROM sites WHERE id=$1`, body.SiteID).Scan(&orgID); err != nil {
+			http.Error(w, "Site not found", http.StatusBadRequest)
+			return
+		}
+		if orgID != userOrg {
+			http.Error(w, "Cross-tenant forbidden", http.StatusForbidden)
+			return
+		}
+	} else if role != "Admin" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec(`UPDATE agents SET site_id=$1, provisioning_status='ASSOCIATED', updated_at=now() WHERE id=$2`, body.SiteID, id); err != nil {
+		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\auth\jwt.go =====
-package auth
+func handleDeactivate(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
+	role := middleware.GetRoleName(r)
+	if role != "Admin" && role != "Operator" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec(`UPDATE agents SET is_active=false, provisioning_status='DEACTIVATED', updated_at=now() WHERE id=$1`, id); err != nil {
+		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func handleDelete(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
+	role := middleware.GetRoleName(r)
+	if role != "Admin" && role != "Operator" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec(`DELETE FROM agents WHERE id=$1`, id); err != nil {
+		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleTest(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
+	// ping simple TCP (ex.: 22) sur l'IP interne si dispo
+	var ip *string
+	if err := db.QueryRow(`SELECT vpn_internal_ip FROM agents WHERE id=$1`, id).Scan(&ip); err != nil || ip == nil {
+		http.Error(w, "Agent not found or no IP", http.StatusBadRequest)
+		return
+	}
+	ok := tcpReachable(strings.Split(*ip, "/")[0], 22, 1500*time.Millisecond) // best effort
+	if ok {
+		_, _ = db.Exec(`UPDATE agents SET provisioning_status='PROVISIONED', updated_at=now() WHERE id=$1`, id)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": ok})
+}
+
+func tcpReachable(host string, port int, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, itoa(port)), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func itoa(i int) string { return errors.New("").Error()[:0] } // dummy to avoid strconv import
+// (ok on va le faire propreâ€¦)
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\agents.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
+package handlers
 
 import (
+	"database/sql"
+	"encoding/json"
+	"net/http"
+
+	middleware "src/backend/middleware"
+)
+
+type AuthMeSitePerm struct {
+	SiteID          string `json:"site_id"`
+	ReadAccess      bool   `json:"read_access"`
+	WriteAccess     bool   `json:"write_access"`
+	CanReceiveAlert bool   `json:"can_receive_alerts"`
+}
+type AuthMeUser struct {
+	ID             string  `json:"id"`
+	Email          string  `json:"email"`
+	FirstName      *string `json:"first_name,omitempty"`
+	LastName       *string `json:"last_name,omitempty"`
+	RoleID         int     `json:"role_id"`
+	OrganizationID *string `json:"organization_id,omitempty"`
+	Attributes     *string `json:"attributes,omitempty"`
+	LastLoginAt    *string `json:"last_login_at,omitempty"`
+	RoleName       string  `json:"role_name"`
+}
+type AuthMeResponse struct {
+	User            AuthMeUser       `json:"user"`
+	Permissions     []string         `json:"permissions"`
+	SitePermissions []AuthMeSitePerm `json:"site_permissions"`
+}
+
+func HandleAuthMe(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		uid := middleware.GetUserID(r)
+		if uid == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var u AuthMeUser
+		if err := db.QueryRow(`
+			SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
+			       u.organization_id, u.attributes, u.last_login_at, r.name
+			  FROM users u
+			  JOIN roles r ON r.id = u.role_id
+			 WHERE u.id = $1
+		`, uid).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.RoleID,
+			&u.OrganizationID, &u.Attributes, &u.LastLoginAt, &u.RoleName); err != nil {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+
+		perms := []string{}
+		rows, err := db.Query(`
+			SELECT p.name
+			  FROM role_permissions rp
+			  JOIN permissions p ON p.id = rp.permission_id
+			 WHERE rp.role_id = $1 AND (rp.read_access = TRUE OR rp.write_access = TRUE)
+		`, u.RoleID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var n string
+				if err := rows.Scan(&n); err == nil {
+					perms = append(perms, n)
+				}
+			}
+		}
+
+		sperm := []AuthMeSitePerm{}
+		if u.RoleID == 3 {
+			sr, err := db.Query(`
+				SELECT site_id, read_access, write_access, can_receive_alerts
+				  FROM user_site_permissions
+				 WHERE user_id = $1
+			`, u.ID)
+			if err == nil {
+				defer sr.Close()
+				for sr.Next() {
+					var p AuthMeSitePerm
+					if err := sr.Scan(&p.SiteID, &p.ReadAccess, &p.WriteAccess, &p.CanReceiveAlert); err == nil {
+						sperm = append(sperm, p)
+					}
+				}
+			}
+		}
+
+		resp := AuthMeResponse{User: u, Permissions: perms, SitePermissions: sperm}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\schema.go =====
+package handlers
+
+import (
+	"database/sql"
+	"fmt"
+)
+
+func EnsureAgentSchema(db *sql.DB) error {
+	// extensions UUID
+	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`); err != nil {
+		return fmt.Errorf("create extension pgcrypto: %w", err)
+	}
+
+	// agents table
+	_, err := db.Exec(`
+	CREATE TABLE IF NOT EXISTS agents (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		organization_id UUID NULL,
+		site_id UUID NULL,
+		mac_address TEXT UNIQUE NOT NULL,
+		vpn_internal_ip TEXT NULL,
+		wireguard_public_key TEXT NULL,
+		wireguard_private_key TEXT NULL,
+		provisioning_status TEXT NOT NULL DEFAULT 'UNASSOCIATED',
+		is_active BOOLEAN NOT NULL DEFAULT TRUE,
+		last_online_at TIMESTAMPTZ NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	);
+	`)
+	if err != nil { return fmt.Errorf("create agents: %w", err) }
+
+	// helpful index
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_org ON agents (organization_id);`)
+	return nil
+}
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\schema.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
+package middleware
+
+import (
+	"context"
 	"errors"
-	"time"
+	"net/http"
+	"os"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type Claims struct {
-	UserID         string  `json:"uid"`
-	RoleID         int     `json:"rid"`
-	OrganizationID *string `json:"org,omitempty"`
-	jwt.RegisteredClaims
-}
+type ctxKey string
 
-func IssueJWT(secret []byte, userID string, roleID int, organizationID *string) (string, error) {
-	now := time.Now()
-	claims := Claims{
-		UserID:         userID,
-		RoleID:         roleID,
-		OrganizationID: organizationID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(secret)
-}
-
-func ParseJWT(secret []byte, tokenString string) (*Claims, error) {
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
-	token, err := parser.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
-		return secret, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return nil, errors.New("invalid_token")
-	}
-	return claims, nil
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\auth\jwt.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\handlers\agent.go =====
-package handlers
-
-import (
-    "github.com/gofiber/fiber/v2"
-    "github.com/yourorg/yourapp/internal/models"
-    "github.com/yourorg/yourapp/internal/wireguard"
-    "github.com/google/uuid"
-    "gorm.io/gorm"
+const (
+	CtxUserID         ctxKey = "user_id"
+	CtxRoleName       ctxKey = "role"
+	CtxRoleID         ctxKey = "role_id"
+	CtxOrganizationID ctxKey = "organization_id"
 )
 
-func PreRegisterAgent(db *gorm.DB) fiber.Handler {
-    return func(c *fiber.Ctx) error {
-        var req struct {
-            MacAddress string `json:"mac_address"`
-        }
-        if err := c.BodyParser(&req); err != nil {
-            return fiber.ErrBadRequest
-        }
-        var agent models.Agent
-        if err := db.Where("mac_address = ?", req.MacAddress).First(&agent).Error; err == nil {
-            return fiber.NewError(fiber.StatusConflict, "Agent already registered")
-        }
-        peer, script, err := wireguard.CreatePeerAndScript(req.MacAddress)
-        if err != nil {
-            return fiber.ErrInternalServerError
-        }
-        agent = models.Agent{
-            ID:              uuid.New(),
-            MacAddress:      req.MacAddress,
-            Status:          "unassociated",
-            WireGuardPeerID: peer.ID,
-        }
-        if err := db.Create(&agent).Error; err != nil {
-            return fiber.ErrInternalServerError
-        }
-        return c.JSON(fiber.Map{
-            "script": script,
-            "agent":  agent,
-        })
-    }
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\handlers\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\handlers\organization.go =====
-package handlers
-
-import (
-	"encoding/json"
-	"net/http"
-	"strings"
-
-	"backend/internal/auth"
-)
-
-type OrganizationHandler struct {
-	secret []byte
-}
-
-func NewOrganizationHandler(secret []byte) *OrganizationHandler {
-	return &OrganizationHandler{secret: secret}
-}
-
-// CompleteOrganization gÃ¨re GET (lecture) et POST (upsert "dummy-safe")
-// Objectif: Ã©viter les 500 et fournir un JSON conforme au front.
-func (h *OrganizationHandler) CompleteOrganization(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-	// Auth simple par Bearer
-	hdr := r.Header.Get("Authorization")
-	if hdr == "" || !strings.HasPrefix(strings.ToLower(hdr), "bearer ") {
-		http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
-		return
-	}
-	token := strings.TrimSpace(hdr[len("Bearer "):])
-	if _, err := auth.ParseJWT(h.secret, token); err != nil {
-		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		// âš ï¸ Minimal: renvoyer un objet "vide" (le front affiche "N/A" sans planter)
-		resp := map[string]any{
-			"name":           "",
-			"vat_number":     "",
-			"address":        "",
-			"city":           "",
-			"state":          "",
-			"zip_code":       "",
-			"contact_email":  "",
-			"contact_phone":  "",
-			"sdi_code":       "",
-			"pec_email":      "",
-			"personnel_info": "",
-			"manager":   map[string]string{"name": "", "email": "", "phone": ""},
-			"controller": map[string]string{"name": "", "email": "", "phone": ""},
-			"processor":  map[string]string{"name": "", "email": "", "phone": ""},
+func JWT(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ah := r.Header.Get("Authorization")
+		if !strings.HasPrefix(ah, "Bearer ") {
+			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			return
 		}
-		_ = json.NewEncoder(w).Encode(resp)
-		return
-
-	case http.MethodPost:
-		// âš ï¸ Minimal: on accepte la charge utile et on confirme.
-		var in map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&in)
-
-		out := map[string]any{
-			"message":       "organization saved",
-			"organization":  in, // Ã©cho de ce qui est envoyÃ©
+		raw := strings.TrimPrefix(ah, "Bearer ")
+		secret := []byte(os.Getenv("JWT_SECRET"))
+		if len(secret) == 0 {
+			http.Error(w, "JWT secret not configured", http.StatusInternalServerError)
+			return
 		}
-		_ = json.NewEncoder(w).Encode(out)
-		return
-
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-
-	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
+		token, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, errors.New("unexpected signing method")
+			}
+			return secret, nil
+		})
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+		claims, _ := token.Claims.(jwt.MapClaims)
+		ctx := r.Context()
+		if v, _ := claims["user_id"].(string); v != "" {
+			ctx = context.WithValue(ctx, CtxUserID, v)
+		}
+		if v, _ := claims["role"].(string); v != "" {
+			ctx = context.WithValue(ctx, CtxRoleName, v)
+		}
+		if v, ok := claims["role_id"].(float64); ok {
+			ctx = context.WithValue(ctx, CtxRoleID, int(v))
+		}
+		if v, _ := claims["organization_id"].(string); v != "" {
+			ctx = context.WithValue(ctx, CtxOrganizationID, v)
+		}
+		next(w, r.WithContext(ctx))
 	}
 }
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\handlers\organization.go =====
+func GetUserID(r *http.Request) string {
+	if v := r.Context().Value(CtxUserID); v != nil { return v.(string) }
+	return ""
+}
+func GetRoleName(r *http.Request) string {
+	if v := r.Context().Value(CtxRoleName); v != nil { return v.(string) }
+	return ""
+}
+func GetRoleID(r *http.Request) int {
+	if v := r.Context().Value(CtxRoleID); v != nil { return v.(int) }
+	return 0
+}
+func GetOrgID(r *http.Request) string {
+	if v := r.Context().Value(CtxOrganizationID); v != nil { return v.(string) }
+	return ""
+}
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\agent.go =====
-package models
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
+package middleware
 
 import (
-    "github.com/google/uuid"
-    "time"
-)
-
-type Agent struct {
-    ID              uuid.UUID `gorm:"type:uuid;primaryKey"`
-    MacAddress      string    `gorm:"uniqueIndex"`
-    Status          string    // unassociated, associated, deactivated
-    WireGuardPeerID uuid.UUID
-    CreatedAt       time.Time
-    UpdatedAt       time.Time
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\organization.go =====
-package models
-
-type Organization struct {
-	ID            string
-	Name          string
-	Address       *string
-	City          *string
-	State         *string
-	ZipCode       *string
-	VATNumber     *string
-	ContactEmail  *string
-	ContactPhone  *string
-	PecEmail      *string
-	SdiCode       *string
-	PersonnelInfo *string
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\organization.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\user.go =====
-package models
-
-type User struct {
-	ID              string
-	Email           string
-	PasswordHash    string
-	FirstName       *string
-	LastName        *string
-	RoleID          int
-	OrganizationID  *string
-	IsActive        bool
-}
-
-type MeDTO struct {
-	ID             string   `json:"id"`
-	Email          string   `json:"email"`
-	RoleID         int      `json:"role_id"`
-	OrganizationID *string  `json:"organization_id"`
-	Permissions    []string `json:"permissions"`
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\models\user.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\repository\postgres.go =====
-package repository
-
-import (
-	"context"
 	"database/sql"
-
-	_ "github.com/lib/pq"
-
-	"backend/internal/models"
+	"net/http"
 )
 
-type Postgres struct {
-	db *sql.DB
-}
-
-func NewPostgres(dsn string) (*Postgres, error) {
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-	return &Postgres{db: db}, nil
-}
-func (p *Postgres) Close() { _ = p.db.Close() }
-
-// SchÃ©ma conforme Ã  ton script SQL
-func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
-	const q = `
-SELECT id::text, email, password_hash, first_name, last_name, role_id, organization_id::text, is_active
-FROM users WHERE email = $1 LIMIT 1`
-	var u models.User
-	var org sql.NullString
-	err := p.db.QueryRowContext(ctx, q, email).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.FirstName, &u.LastName, &u.RoleID, &org, &u.IsActive,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if org.Valid {
-		tmp := org.String
-		u.OrganizationID = &tmp
-	}
-	return &u, nil
-}
-
-func (p *Postgres) GetUserByID(ctx context.Context, id string) (*models.User, error) {
-	const q = `
-SELECT id::text, email, password_hash, first_name, last_name, role_id, organization_id::text, is_active
-FROM users WHERE id = $1 LIMIT 1`
-	var u models.User
-	var org sql.NullString
-	err := p.db.QueryRowContext(ctx, q, id).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.FirstName, &u.LastName, &u.RoleID, &org, &u.IsActive,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if org.Valid {
-		tmp := org.String
-		u.OrganizationID = &tmp
-	}
-	return &u, nil
-}
-
-// Construit la liste des permissions depuis role_permissions + permissions
-// (ton schÃ©ma: permissions(name) comme 'organizations:read', 'monitoring:write', etc.)
-func (p *Postgres) BuildPermissions(ctx context.Context, roleID int) ([]string, error) {
-	const q = `
-SELECT p.name, rp.read_access, rp.write_access
-FROM role_permissions rp
-JOIN permissions p ON p.id = rp.permission_id
-WHERE rp.role_id = $1`
-	rows, err := p.db.QueryContext(ctx, q, roleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	permSet := map[string]struct{}{}
-	for rows.Next() {
-		var name string
-		var read, write bool
-		if err := rows.Scan(&name, &read, &write); err != nil {
-			return nil, err
-		}
-		if read || write {
-			permSet[name] = struct{}{}
+// AttachPermissions est un "no-op" middleware ici (perms sont rÃ©solues dans /api/auth/me).
+// On le garde pour compatibilitÃ© avec ton main.go.
+func AttachPermissions(_ *sql.DB) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			next(w, r)
 		}
 	}
-	out := make([]string, 0, len(permSet))
-	for k := range permSet {
-		out = append(out, k)
-	}
-	return out, nil
 }
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\repository\postgres.go =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\wireguard\wg.go =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
+package rbac
+
+import (
+	"net/http"
+
+	"github.com/expirianet/NetSecure-IQ/backend/middleware"
+)
+
+// EnforceOperatorScope est un simple wrapper : les handlers appliquent le filtre
+// (Admin -> tout ; Operator -> org ; User -> 403 sur endpoints admin/op).
+func EnforceOperatorScope(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		role := middleware.GetRoleName(r)
+		if role == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// Ici on pourrait imposer des headers/contexte supplÃ©mentaires.
+		next(w, r)
+	}
+}
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
 package wireguard
 
 import (
-    "crypto/rand"
-    "encoding/base64"
-    "fmt"
-    "github.com/google/uuid"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"sync/atomic"
 )
 
-type Peer struct {
-    ID         uuid.UUID
-    PrivateKey string
-    PublicKey  string
-    IPAddress  string
-    Enabled    bool
-}
+var ipCounter uint32 = 10 // start from .10
 
 func GenerateKeyPair() (privateKey, publicKey string, err error) {
-    priv := make([]byte, 32)
-    _, err = rand.Read(priv)
-    if err != nil {
-        return "", "", err
-    }
-    privateKey = base64.StdEncoding.EncodeToString(priv)
-    publicKey = base64.StdEncoding.EncodeToString([]byte(reverse(string(priv))))
-    return privateKey, publicKey, nil
+	// âš ï¸ ceci n'est PAS une vraie clÃ© WireGuard, mais OK pour un PoC cÃ´tÃ© FE.
+	priv := make([]byte, 32)
+	if _, err = rand.Read(priv); err != nil { return "", "", err }
+	privateKey = base64.StdEncoding.EncodeToString(priv)
+	publicKey = base64.StdEncoding.EncodeToString(reverseBytes(priv))
+	return privateKey, publicKey, nil
 }
 
-func reverse(s string) string {
-    runes := []rune(s)
-    for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-        runes[i], runes[j] = runes[j], runes[i]
-    }
-    return string(runes)
+func reverseBytes(b []byte) []byte {
+	n := len(b)
+	out := make([]byte, n)
+	for i := 0; i < n; i++ { out[i] = b[n-1-i] }
+	return out
 }
 
-func CreatePeerAndScript(mac string) (*Peer, string, error) {
-    priv, pub, err := GenerateKeyPair()
-    if err != nil {
-        return nil, "", err
-    }
-    peer := &Peer{
-        ID:         uuid.New(),
-        PrivateKey: priv,
-        PublicKey:  pub,
-        IPAddress:  fmt.Sprintf("10.10.10.%d/32", randByte()),
-        Enabled:    false,
-    }
-    script := GenerateMikrotikScript(peer, mac)
-    return peer, script, nil
+func ReserveVPNIP() string {
+	n := atomic.AddUint32(&ipCounter, 1)
+	return fmt.Sprintf("10.10.10.%d/32", n%250+5)
 }
 
-func randByte() int {
-    b := make([]byte, 1)
-    rand.Read(b)
-    return int(b[0])
-}
-
-func GenerateMikrotikScript(peer *Peer, mac string) string {
-    return fmt.Sprintf(`
-# MikroTik WireGuard onboarding script
+func GenerateMikrotikScript(privateKey, ip string) string {
+	return fmt.Sprintf(`# MikroTik WireGuard onboarding script
 /interface wireguard add name=wg0 private-key="%s"
 /ip address add address=%s interface=wg0
 /interface wireguard peers add public-key="SERVER_PUBLIC_KEY" endpoint-address="vpn.example.com" endpoint-port=51820 allowed-address=0.0.0.0/0
-# MAC: %s
-`, peer.PrivateKey, peer.IPAddress, mac)
+`, privateKey, ip)
 }
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\backend\internal\wireguard\wg.go =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 <template>
@@ -664,16 +769,8 @@ body {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\babelconfig.js =====
-module.exports = {
-  presets: [
-    '@vue/cli-plugin-babel/preset'
-  ]
-}
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\babelconfig.js =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddOperatorForm.vue =====
+
 <template>
   <div class="add-operator-page">
     <h2>Add New Operator</h2>
@@ -694,7 +791,7 @@ module.exports = {
         <input v-model="lastName" type="text" required />
       </div>
 
-      <button type="submit">Add Operator</button>
+      <button type="submit" :disabled="loading">Add Operator</button>
       <p v-if="message">{{ message }}</p>
     </form>
   </div>
@@ -702,36 +799,54 @@ module.exports = {
 
 <script setup>
 import { ref } from 'vue'
-import jwtDecode from 'jwt-decode'
 import { API } from '@/utils/api.js'
 
-const email = ref(''); const firstName = ref(''); const lastName = ref(''); const message = ref('')
+const email = ref('')
+const firstName = ref('')
+const lastName = ref('')
+const message = ref('')
+const loading = ref(false)
 
 const submitForm = async () => {
+  loading.value = true
+  message.value = ''
   try {
     const token = localStorage.getItem('token') || ''
-    const decoded = token ? jwtDecode(token) : {}
-    const organization_id = decoded?.organization_id
+    // Le back ne met pas organization_id dans le JWT.
+    // On le rÃ©cupÃ¨re de la rÃ©ponse /api/login sauvegardÃ©e en localStorage.
+    const orgId = localStorage.getItem('organization_id') || ''
 
     const payload = {
-      email: email.value, first_name: firstName.value, last_name: lastName.value, role: 'operator',
-      ...(organization_id ? { organization_id: String(organization_id) } : {})
+      email: email.value,
+      first_name: firstName.value,
+      last_name: lastName.value,
+      role: 'operator',
+      ...(orgId ? { organization_id: String(orgId) } : {}) // optionnel si vide
     }
 
     const res = await fetch(`${API}/api/users`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: 'Bearer ' + token } : {})
+      },
       body: JSON.stringify(payload)
     })
     const data = await res.json().catch(() => ({}))
-    message.value = res.ok ? 'âœ… Operator created successfully!' : 'âŒ Failed: ' + (data.error || data.message)
+    if (!res.ok) {
+      throw new Error(data.error || data.message || 'Request failed')
+    }
+    message.value = 'âœ… Operator created successfully!'
+    email.value = ''
+    firstName.value = ''
+    lastName.value = ''
   } catch (err) {
-    message.value = 'âŒ Internal error: ' + err.message
+    message.value = 'âŒ Failed: ' + (err.message || 'Unknown error')
+  } finally {
+    loading.value = false
   }
 }
 </script>
-
-
 
 <style scoped>
 .add-operator-page {
@@ -775,9 +890,11 @@ const submitForm = async () => {
 }
 </style>
 
+
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddOperatorForm.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddUserForm.vue =====
+
 <!-- src/frontend/src/components/AddUserForm.vue -->
 <template>
   <div class="adduser-page">
@@ -846,25 +963,22 @@ const submitForm = async () => {
             <div class="form-section">
               <h4><i class="fas fa-building"></i> Organization</h4>
 
-              <div v-if="isAdmin" class="field">
-                <label for="org">Select organization</label>
-                <select
-                  id="org"
-                  v-model="selectedOrg"
-                  :class="{ invalid: showErrors && !orgValid }"
-                  required
-                >
-                  <option disabled value="">Select organizationâ€¦</option>
-                  <option v-for="org in organizations" :key="org.id" :value="org.id">
-                    {{ org.name }}
-                  </option>
-                </select>
-                <small v-if="showErrors && !orgValid">Organization is required.</small>
-              </div>
-
-              <div v-else class="readonly-pill" title="Taken from your session">
+              <!-- Operator : org imposÃ©e depuis la session -->
+              <div v-if="isOperator" class="readonly-pill" title="Taken from your session">
                 <span class="dot"></span>
                 Using your organization: <code>{{ userOrgId || 'â€”' }}</code>
+              </div>
+
+              <!-- Admin : pas dâ€™endpoint de liste => champ optionnel -->
+              <div v-if="isAdmin" class="field">
+                <label for="orgIdManual">Organization ID (optional)</label>
+                <input
+                  id="orgIdManual"
+                  v-model.trim="orgIdManual"
+                  type="text"
+                  placeholder="UUIDâ€¦ (leave empty to create user without org)"
+                />
+                <small class="hint">No organization list endpoint available. You can paste a UUID or leave empty.</small>
               </div>
 
               <div class="readonly-pill" title="Role is fixed for this screen">
@@ -964,20 +1078,25 @@ const showErrors     = ref(false)
 /* ---------- Contexte auth ---------- */
 const token   = localStorage.getItem('token') || ''
 const roleStr = (localStorage.getItem('role') || '').toLowerCase()
-const isAdmin = computed(() => roleStr === 'administrator')
-const userOrgId = (localStorage.getItem('organization_id') || '').toString()
+const isAdmin    = computed(() => roleStr === 'administrator')
+const isOperator = computed(() => roleStr === 'operator')
+const userOrgId  = (localStorage.getItem('organization_id') || '').toString()
 
-/* ---------- Orgs ---------- */
-const organizations = ref([])
-const selectedOrg   = ref('')
+/* ---------- Admin: org manuelle optionnelle ---------- */
+const orgIdManual = ref('')
 
 /* ---------- Validation ---------- */
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i
 const firstNameValid = computed(() => firstName.value.trim().length >= 2)
 const lastNameValid  = computed(() => lastName.value.trim().length >= 2)
 const emailValid     = computed(() => emailRe.test(email.value))
-const orgValid       = computed(() => (isAdmin.value ? !!selectedOrg.value : !!userOrgId))
-const formValid      = computed(() =>
+
+// orgValid :
+// - operator -> doit avoir une org en session
+// - admin    -> champ optionnel (toujours true)
+const orgValid = computed(() => (isOperator.value ? !!userOrgId : true))
+
+const formValid = computed(() =>
   firstNameValid.value && lastNameValid.value && emailValid.value && orgValid.value
 )
 
@@ -1004,34 +1123,24 @@ function generatePassword() {
 }
 function toggleShowPassword() { showPassword.value = !showPassword.value }
 
-/* ---------- Data ---------- */
-async function loadOrganizations() {
-  if (!isAdmin.value) return
-  try {
-    const res = await fetch(`${API}/api/organizations`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-    const data = await res.json().catch(() => ({}))
-    organizations.value = Array.isArray(data.organizations) ? data.organizations : []
-  } catch (e) {
-    console.debug('[org] load failed', e)
-    organizations.value = []
-  }
-}
-
 /* ---------- Submit ---------- */
 async function submitForm() {
   showErrors.value = true
   if (!formValid.value) return
 
-  const orgId = isAdmin.value ? String(selectedOrg.value) : String(userOrgId)
+  // DÃ©termine lâ€™orgId selon le rÃ´le
+  const resolvedOrgId = isOperator.value
+    ? String(userOrgId || '')
+    : String(orgIdManual.value || '')
+
   const payload = {
     email: email.value,
     first_name: firstName.value,
     last_name: lastName.value,
-    phone: phone.value || undefined,
+    phone: phone.value || undefined, // ignorÃ© par le back actuel (sans impact)
     role: 'user',
-    organization_id: orgId,
+    ...(resolvedOrgId ? { organization_id: resolvedOrgId } : {}),
+    // options purement front pour lâ€™instant (le back les ignore sans erreur)
     send_invite: sendInvite.value,
     require_password_reset: requireReset.value,
     active: active.value,
@@ -1062,7 +1171,7 @@ async function submitForm() {
     lastName.value = ''
     phone.value = ''
     tempPassword.value = ''
-    if (isAdmin.value) selectedOrg.value = ''
+    if (isAdmin.value) orgIdManual.value = ''
     showErrors.value = false
   } catch (err) {
     successMessage.value = false
@@ -1086,7 +1195,6 @@ onMounted(async () => {
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(ID, renderParticles)
-  loadOrganizations()
 })
 
 onBeforeUnmount(() => {
@@ -1157,6 +1265,7 @@ input::placeholder { color: var(--text-secondary); }
 input:focus, select:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
 .invalid { border-color: var(--danger)!important; }
 small { color: var(--danger); }
+small.hint { color: var(--text-secondary); }
 
 .readonly-pill {
   display: inline-flex; align-items: center; gap: 8px;
@@ -1204,6 +1313,7 @@ small { color: var(--danger); }
 @media (max-width: 760px) { .form-row { grid-template-columns: 1fr; } }
 </style>
 
+
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddUserForm.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
@@ -1227,7 +1337,9 @@ function render() {
 }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try { await loadParticlesScript() } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
   ensurePJSDom()
   render()
   stopObs = observeTheme(ID, render)
@@ -2026,7 +2138,9 @@ function render() {
 }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try { await loadParticlesScript() } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
   ensurePJSDom()
   render()
   stopObs = observeTheme(ID, render)
@@ -2362,180 +2476,235 @@ const login = async () => {
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\LoginForm.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
+
 <template>
-    <div class="org-page">
-      <!-- Fond animÃ© isolÃ© pour la page profil -->
-      <div id="org-particles" class="particles-layer"></div>
-  
-      <div class="wrapper">
-        <div class="container">
-          <div class="card">
-            <h2 class="title">NetSecure-IQ</h2>
-            <h3 class="subtitle">Organization Profile</h3>
-  
-            <div v-if="!org" class="empty">
-              <p>No organization information saved yet.</p>
-              <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
-            </div>
-  
-            <div v-else class="content">
-              <section class="section">
-                <h4 class="section-title"><i class="fas fa-building"></i> Organization Information</h4>
-                <div class="grid">
-                  <div class="row"><label>Name</label><span>{{ safe(org.name) }}</span></div>
-                  <div class="row"><label>VAT / Fiscal Code</label><span>{{ safe(org.vat_number) }}</span></div>
-                  <div class="row wide"><label>Address</label><span>{{ safe(org.address) }}</span></div>
-                  <div class="row"><label>City</label><span>{{ safe(org.city) }}</span></div>
-                  <div class="row"><label>State</label><span>{{ safe(org.state) }}</span></div>
-                  <div class="row"><label>ZIP</label><span>{{ safe(org.zip_code) }}</span></div>
-                  <div class="row"><label>Email</label><span>{{ safe(org.contact_email) }}</span></div>
-                  <div class="row"><label>Phone</label><span>{{ safe(org.contact_phone) }}</span></div>
-                  <div class="row"><label>PEC Email</label><span>{{ safe(org.pec_email) }}</span></div>
-                  <div class="row"><label>SDI Code</label><span>{{ safe(org.sdi_code) }}</span></div>
-                </div>
-              </section>
-  
-              <section class="section">
-                <h4 class="section-title"><i class="fas fa-user-tie"></i> Company Manager</h4>
-                <div class="grid">
-                  <div class="row"><label>Name</label><span>{{ person(manager).name }}</span></div>
-                  <div class="row"><label>Email</label><span>{{ person(manager).email }}</span></div>
-                  <div class="row"><label>Phone</label><span>{{ person(manager).phone }}</span></div>
-                </div>
-              </section>
-  
-              <section v-if="hasTechnical" class="section">
-                <h4 class="section-title"><i class="fas fa-user-cog"></i> Technical Manager</h4>
-                <div class="grid">
-                  <div class="row"><label>Name</label><span>{{ person(technical).name }}</span></div>
-                  <div class="row"><label>Email</label><span>{{ person(technical).email }}</span></div>
-                  <div class="row"><label>Phone</label><span>{{ person(technical).phone }}</span></div>
-                </div>
-              </section>
-  
-              <section class="section">
-                <h4 class="section-title"><i class="fas fa-shield-alt"></i> Data Controller</h4>
-                <div class="grid">
-                  <div class="row"><label>Name</label><span>{{ person(controller).name }}</span></div>
-                  <div class="row"><label>Email</label><span>{{ person(controller).email }}</span></div>
-                  <div class="row"><label>Phone</label><span>{{ person(controller).phone }}</span></div>
-                </div>
-              </section>
-  
-              <section class="section">
-                <h4 class="section-title"><i class="fas fa-database"></i> Data Processor</h4>
-                <div class="grid">
-                  <div class="row"><label>Name</label><span>{{ person(processor).name }}</span></div>
-                  <div class="row"><label>Email</label><span>{{ person(processor).email }}</span></div>
-                  <div class="row"><label>Phone</label><span>{{ person(processor).phone }}</span></div>
-                </div>
-              </section>
-  
-              <section v-if="org.personnel_info" class="section">
-                <h4 class="section-title"><i class="fas fa-file-alt"></i> Personnel Info</h4>
-                <pre class="pre">{{ org.personnel_info }}</pre>
-              </section>
-  
-              <div class="actions">
-                <RouterLink class="btn primary" to="/organization/edit">Edit</RouterLink>
-                <button class="btn ghost" @click="clearLocal">Reset local data</button>
+  <div class="org-page">
+    <!-- Fond animÃ© isolÃ© pour la page profil -->
+    <div id="org-particles" class="particles-layer"></div>
+
+    <div class="wrapper">
+      <div class="container">
+        <div class="card">
+          <h2 class="title">NetSecure-IQ</h2>
+          <h3 class="subtitle">Organization Profile</h3>
+
+          <div v-if="!org" class="empty">
+            <p>No organization information saved yet.</p>
+            <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
+          </div>
+
+          <div v-else class="content">
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-building"></i> Organization Information</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ safe(org.name) }}</span></div>
+                <div class="row"><label>VAT / Fiscal Code</label><span>{{ safe(org.vat_number) }}</span></div>
+                <div class="row wide"><label>Address</label><span>{{ safe(org.address) }}</span></div>
+                <div class="row"><label>City</label><span>{{ safe(org.city) }}</span></div>
+                <div class="row"><label>State</label><span>{{ safe(org.state) }}</span></div>
+                <div class="row"><label>ZIP</label><span>{{ safe(org.zip_code) }}</span></div>
+                <div class="row"><label>Email</label><span>{{ safe(org.contact_email) }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ safe(org.contact_phone) }}</span></div>
+                <div class="row"><label>PEC Email</label><span>{{ safe(org.pec_email) }}</span></div>
+                <div class="row"><label>SDI Code</label><span>{{ safe(org.sdi_code) }}</span></div>
               </div>
+            </section>
+
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-user-tie"></i> Company Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(manager).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(manager).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(manager).phone }}</span></div>
+              </div>
+            </section>
+
+            <section v-if="hasTechnical" class="section">
+              <h4 class="section-title"><i class="fas fa-user-cog"></i> Technical Manager</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(technical).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(technical).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(technical).phone }}</span></div>
+              </div>
+            </section>
+
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-shield-alt"></i> Data Controller</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(controller).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(controller).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(controller).phone }}</span></div>
+              </div>
+            </section>
+
+            <section class="section">
+              <h4 class="section-title"><i class="fas fa-database"></i> Data Processor</h4>
+              <div class="grid">
+                <div class="row"><label>Name</label><span>{{ person(processor).name }}</span></div>
+                <div class="row"><label>Email</label><span>{{ person(processor).email }}</span></div>
+                <div class="row"><label>Phone</label><span>{{ person(processor).phone }}</span></div>
+              </div>
+            </section>
+
+            <section v-if="org.personnel_info" class="section">
+              <h4 class="section-title"><i class="fas fa-file-alt"></i> Personnel Info</h4>
+              <pre class="pre">{{ org.personnel_info }}</pre>
+            </section>
+
+            <div class="actions">
+              <RouterLink class="btn primary" to="/organization/edit">Edit</RouterLink>
+              <button class="btn ghost" @click="clearLocal">Reset local data</button>
             </div>
           </div>
         </div>
       </div>
     </div>
-  </template>
-  
-  <script setup>
-  /**
-   * Important :
-   * - Pas de <BackgroundParticles/> ici.
-   * - On utilise un ID dÃ©diÃ© + utilitaires robustes pour particles.js.
-   */
-  import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
-  import {
-    ensurePJSDom, loadParticlesScript, defaultConfig,
-    safeRender, observeTheme, destroyForId, themeIsDark
-  } from '@/utils/particles.js'
-  
-  const CONTAINER_ID = 'org-particles'
-  let stopObs = () => {}
-  
-  function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
-  
-  /* ----- DonnÃ©es locales ----- */
-  function readLocal() { try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') } catch { return null } }
-  const org = ref(readLocal())
-  const manager    = computed(() => org.value?.manager    || {})
-  const technical  = computed(() => org.value?.technical  || null)
-  const controller = computed(() => org.value?.controller || {})
-  const processor  = computed(() => org.value?.processor  || {})
-  const hasTechnical = computed(() => !!(technical.value && (technical.value.name || technical.value.email || technical.value.phone)))
-  function safe(v) { return (v ?? '').toString().trim() || 'â€”' }
-  function person(p) { return { name: safe(p?.name), email: safe(p?.email), phone: safe(p?.phone) } }
-  function clearLocal() { localStorage.removeItem('organization_profile'); org.value = null }
-  
-  onMounted(async () => {
-    document.title = 'NetSecure-IQ - Organization Profile'
-    org.value = readLocal()
-  
-    try { await loadParticlesScript() } catch {}
-    ensurePJSDom()
-    renderParticles()
-    stopObs = observeTheme(CONTAINER_ID, renderParticles)
-  })
-  
-  onBeforeUnmount(() => {
-    stopObs?.()
-    ensurePJSDom()
-    destroyForId(CONTAINER_ID)
-  })
-  </script>
-  
-  <style scoped>
-  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
-  
-  :root{ --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
-  --text-primary:#f5f7fa; --text-secondary:#9ca3af; --primary-accent:#00c2c2; --primary-hover:#00a7a7;
-  --radius:16px; --danger:#ef4444; --success:#22c55e; }
-  
-  .org-page{ position:relative; min-height:100vh; overflow:hidden; }
-  .particles-layer{ position:fixed; inset:0; width:100vw; height:100vh; z-index:0; pointer-events:none; }
-  
-  .wrapper{ position:relative; z-index:10; display:flex; align-items:flex-start; justify-content:center; padding:32px; min-height:100vh; }
-  .container{ width:100%; max-width:1000px; }
-  .card{ background:var(--panel-grey); border-radius:var(--radius); padding:26px; border:1px solid rgba(255,255,255,.06); box-shadow:0 0 40px rgba(0,194,194,.05); }
-  
-  .title{ text-align:center; font-size:20px; font-weight:600; color:var(--primary-accent); margin-bottom:6px; }
-  .subtitle{ text-align:center; font-size:16px; margin-bottom:20px; }
-  
-  .section{ margin-top:16px; padding:14px; border:1px solid rgba(255,255,255,.05); border-radius:12px; background:rgba(31,41,55,.30); }
-  .section-title{ margin:0 0 10px; color:var(--primary-accent); font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; }
-  
-  .grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; }
-  .row{ display:flex; flex-direction:column; gap:6px; }
-  .row.wide{ grid-column: 1 / -1; }
-  label{ font-size:12px; color:var(--text-secondary); }
-  span{ font-size:14px; color:var(--text-primary); }
-  
-  .pre{ white-space:pre-wrap; background:#0b0e16; border:1px solid var(--divider-grey); border-radius:8px; padding:10px 12px; color:#e5e7eb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  
-  .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap; }
-  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; border-radius:8px; font-weight:700; cursor:pointer; padding:10px 14px; transition:.2s; }
-  .btn.primary{ background:var(--primary-accent); color:#0e111a; }
-  .btn.primary:hover{ background:var(--primary-hover); color:#fff; }
-  .btn.ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); color:var(--text-primary); }
-  .btn.ghost:hover{ background:rgba(255,255,255,.10); }
-  
-  .empty{ text-align:center; color:var(--text-secondary); padding:10px 0 4px; display:grid; gap:12px; }
-  @media (max-width: 720px){ .wrapper{ padding:16px; } .card{ padding:20px; } }
-  </style>
-  
+  </div>
+</template>
+
+<script setup>
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/utils/particles.js'
+
+const CONTAINER_ID = 'org-particles'
+let stopObs = () => {}
+function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
+
+/* DonnÃ©es locales */
+function readLocal() {
+  try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
+  catch (e) { console.debug('[org] read local failed', e); return null }
+}
+const org = ref(readLocal())
+const manager    = computed(() => org.value?.manager    || {})
+const technical  = computed(() => org.value?.technical  || null)
+const controller = computed(() => org.value?.controller || {})
+const processor  = computed(() => org.value?.processor  || {})
+const hasTechnical = computed(() => !!(technical.value && (technical.value.name || technical.value.email || technical.value.phone)))
+function safe(v) { return (v ?? '').toString().trim() || 'â€”' }
+function person(p) { return { name: safe(p?.name), email: safe(p?.email), phone: safe(p?.phone) } }
+function clearLocal() { localStorage.removeItem('organization_profile'); org.value = null }
+
+onMounted(async () => {
+  document.title = 'NetSecure-IQ - Organization Profile'
+  org.value = readLocal()
+  try { await loadParticlesScript() } catch (e) { console.debug('[particles] load failed (non-blocking)', e) }
+  ensurePJSDom()
+  renderParticles()
+  stopObs = observeTheme(CONTAINER_ID, renderParticles)
+})
+
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(CONTAINER_ID)
+})
+</script>
+
+<style scoped>
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
+:root{
+  --bg-dark:#0e111a; --panel-grey:#1a1d26; --divider-grey:#2a2d36;
+  --text-primary:#f5f7fa; --text-secondary:#9ca3af;
+  --primary-accent:#00c2c2; --primary-hover:#00a7a7;
+  --danger:#ef4444; --success:#22c55e;
+}
+
+/* Layout */
+.org-page{ position:relative; min-height:100vh; overflow:hidden; }
+.particles-layer{ position:fixed; inset:0; width:100vw; height:100vh; z-index:0; pointer-events:none; }
+.wrapper{ position:relative; z-index:10; display:flex; align-items:flex-start; justify-content:center; padding:32px; min-height:100vh; }
+.container{ width:100%; max-width:1000px; }
+
+/* >>> Carte principale : identique Ã  OrganizationForm */
+.card{
+  background-color: var(--panel-grey);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05);
+  border: 1px solid rgba(255,255,255,.05);
+}
+
+/* Titres */
+.title{ text-align:center; font-size:20px; font-weight:600; color:var(--primary-accent); margin-bottom:6px; }
+.subtitle{ text-align:center; font-size:16px; margin-bottom:20px; }
+
+/* >>> Sections : identiques Ã  OrganizationForm (.form-section) */
+.section{
+  background-color: rgba(31,41,55,.30);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255,255,255,.05);
+  transition: background-color .3s;
+}
+.section-title{
+  color: var(--primary-accent);
+  margin: 0 0 12px;
+  font-size: 16px; font-weight: 500;
+  display:flex; gap:8px; align-items:center;
+}
+
+/* Grille */
+.grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; }
+.row{ display:flex; flex-direction:column; gap:6px; }
+.row.wide{ grid-column: 1 / -1; }
+label{ font-size:12px; color:var(--text-secondary); }
+span{ font-size:14px; color:var(--text-primary); }
+
+/* Bloc texte */
+.pre{
+  white-space:pre-wrap;
+  background:#0b0e16;
+  border:1px solid var(--divider-grey);
+  border-radius: 8px;
+  padding:10px 12px;
+  color:#e5e7eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Actions */
+.actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:4px; flex-wrap:wrap; }
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  border:none; border-radius:8px; font-weight:700; cursor:pointer; padding:10px 14px; transition:.2s;
+}
+.btn.primary{ background:var(--primary-accent); color:#0e111a; }
+.btn.primary:hover{ background:var(--primary-hover); color:#fff; }
+.btn.ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); color:var(--text-primary); }
+.btn.ghost:hover{ background:rgba(255,255,255,.10); }
+
+/* Light theme overrides â€“ mÃªmes rÃ¨gles que OrganizationForm */
+:root:not([data-theme='dark']) .section{
+  background-color: rgba(243,244,246,.5);
+  border: 1px solid rgba(209,213,219,.5);
+}
+[data-theme='light'] .card{
+  background: #ffffff;
+  border-color: var(--panel-border);
+  box-shadow: var(--panel-shadow);
+}
+[data-theme='light'] .pre{
+  background:#ffffff; color:#0f172a; border-color: var(--panel-border);
+}
+
+.empty{ text-align:center; color:var(--text-secondary); padding:10px 0 4px; display:grid; gap:12px; }
+
+@media (max-width: 720px){
+  .wrapper{ padding:16px; }
+  .card{ padding:24px; }
+}
+</style>
+
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\OrganizationForm.vue =====
+
 <template>
   <div class="login-page">
     <!-- Fond animÃ© isolÃ© pour le form -->
@@ -2631,10 +2800,15 @@ let stopObs = () => {}
 function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
 
 onMounted(async () => {
-  try { await loadParticlesScript() } catch {}
+  try { await loadParticlesScript() }
+  catch (e) { console.debug('[particles] load failed (non-blocking)', e) }
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(CONTAINER_ID, renderParticles)
+
+  // prÃ©-remplissage : d'abord localStorage, puis API
+  preloadFromLocal()
+  await preloadFromAPI()
 })
 onBeforeUnmount(() => {
   stopObs?.()
@@ -2642,7 +2816,8 @@ onBeforeUnmount(() => {
   destroyForId(CONTAINER_ID)
 })
 
-/* ---------- DonnÃ©es & Submit ---------- */
+/* ---------- Ã‰tat + helpers ---------- */
+const orgId = ref('') // conservÃ© pour l'update
 const form = reactive({
   name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
   email: '', pec_email: '', sdi: '', phone: '',
@@ -2654,8 +2829,69 @@ const form = reactive({
 
 const goToDashboard = () => router.push('/dashboard')
 
-const submitForm = async () => {
-  const personnelInfo = `
+function safe(v) { return (v ?? '').toString().trim() }
+function assignIf(key, v) { if (safe(v)) form[key] = v }
+
+/* ---------- PrÃ©-chargement LOCAL ---------- */
+function readLocalProfile() {
+  try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
+  catch (e) { console.debug('[org] local read failed', e); return null }
+}
+function preloadFromLocal() {
+  const p = readLocalProfile()
+  if (!p) return
+  if (p.id) orgId.value = String(p.id)
+
+  // champs d'orga
+  assignIf('name',        p.name)
+  assignIf('vat_number',  p.vat_number)
+  assignIf('address',     p.address)
+  assignIf('city',        p.city)
+  assignIf('state',       p.state)
+  assignIf('zip_code',    p.zip_code)
+  assignIf('email',       p.contact_email || p.email)
+  assignIf('phone',       p.contact_phone || p.phone)
+  assignIf('pec_email',   p.pec_email)
+  assignIf('sdi',         p.sdi_code || p.sdi)
+
+  // responsables (local only)
+  if (p.manager)   { assignIf('manager_name',   p.manager.name);   assignIf('manager_email',   p.manager.email);   assignIf('manager_phone',   p.manager.phone) }
+  if (p.technical) { assignIf('technical_name', p.technical.name); assignIf('technical_email', p.technical.email); assignIf('technical_phone', p.technical.phone) }
+  if (p.controller){ assignIf('controller_name',p.controller.name);assignIf('controller_email',p.controller.email);assignIf('controller_phone', p.controller.phone) }
+  if (p.processor) { assignIf('processor_name', p.processor.name); assignIf('processor_email', p.processor.email); assignIf('processor_phone', p.processor.phone) }
+}
+
+/* ---------- PrÃ©-chargement API ---------- */
+async function preloadFromAPI() {
+  const token = localStorage.getItem('token') || ''
+  if (!token) return
+  try {
+    const res = await fetch(`${API}/api/complete-organization`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    })
+    if (!res.ok) return
+    const data = await res.json().catch(() => ({}))
+    if (!data || !Object.keys(data).length) return
+
+    if (data.id) orgId.value = String(data.id)
+    assignIf('name',       data.name)
+    assignIf('vat_number', data.vat_number)
+    assignIf('address',    data.address)
+    assignIf('city',       data.city)
+    assignIf('state',      data.state)
+    assignIf('zip_code',   data.zip_code)
+    assignIf('email',      data.contact_email)
+    assignIf('phone',      data.contact_phone)
+    assignIf('pec_email',  data.pec_email)
+    assignIf('sdi',        data.sdi_code)
+
+    persistLocal()
+  } catch (e) { console.debug('[org] preloadFromAPI skipped', e) }
+}
+
+/* ---------- Construit le personnel_info (texte) ---------- */
+function buildPersonnelInfo() {
+  return `
 Company Manager:
   Name: ${form.manager_name}
   Email: ${form.manager_email}
@@ -2676,21 +2912,33 @@ Data Processor:
   Email: ${form.processor_email}
   Phone: ${form.processor_phone}
 `.trim()
+}
 
-  const stored = {
+/* ---------- Persistance locale unifiÃ©e ---------- */
+function asStoredObject() {
+  return {
+    id: orgId.value || undefined,
     name: form.name, vat_number: form.vat_number, address: form.address,
     city: form.city, state: form.state, zip_code: form.zip_code,
     contact_email: form.email, contact_phone: form.phone,
     pec_email: form.pec_email, sdi_code: form.sdi,
-    personnel_info: personnelInfo,
-    manager:   { name: form.manager_name,    email: form.manager_email,    phone: form.manager_phone },
-    technical: { name: form.technical_name,  email: form.technical_email,  phone: form.technical_phone },
-    controller:{ name: form.controller_name, email: form.controller_email, phone: form.controller_phone },
-    processor: { name: form.processor_name,  email: form.processor_email,  phone: form.processor_phone },
+    personnel_info: buildPersonnelInfo(),
+    manager:   { name: form.manager_name,   email: form.manager_email,   phone: form.manager_phone },
+    technical: { name: form.technical_name, email: form.technical_email, phone: form.technical_phone },
+    controller:{ name: form.controller_name,email: form.controller_email,phone: form.controller_phone },
+    processor: { name: form.processor_name, email: form.processor_email, phone: form.processor_phone },
   }
-  localStorage.setItem('organization_profile', JSON.stringify(stored))
+}
+function persistLocal() {
+  localStorage.setItem('organization_profile', JSON.stringify(asStoredObject()))
+}
+
+/* ---------- Submit ---------- */
+const submitForm = async () => {
+  const personnelInfo = buildPersonnelInfo()
 
   const payload = {
+    id: orgId.value || undefined,
     name: form.name, vat_number: form.vat_number, address: form.address,
     state: form.state, city: form.city, zip_code: form.zip_code,
     contact_email: form.email, pec_email: form.pec_email, sdi_code: form.sdi,
@@ -2708,13 +2956,20 @@ Data Processor:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
-    }).catch(() => null)
+    })
 
-    if (res && res.ok) { await res.text().catch(() => '') }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed')
+
+    if (data?.organization?.id) orgId.value = String(data.organization.id)
+
+    persistLocal()
+
     successMessage.value = true
     message.value = 'Organization info saved.'
     setTimeout(() => router.push('/organization'), 400)
-  } catch {
+  } catch (e) {
+    persistLocal()
     successMessage.value = true
     message.value = 'Organization info saved locally.'
     setTimeout(() => router.push('/organization'), 400)
@@ -2736,13 +2991,11 @@ Data Processor:
 
 .login-page { position: relative; min-height: 100vh; overflow: hidden; background-color: var(--bg-dark); }
 
-/* Conteneur animÃ© dÃ©diÃ© */
 #org-form-particles {
   position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0;
   background-color: var(--bg-dark); pointer-events: none; transition: background-color .3s;
 }
 [data-theme='light'] #org-form-particles { background-color: #f6f8fb; }
-
 
 .login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
 .login-container { width: 100%; max-width: 800px; }
@@ -2783,6 +3036,7 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
   button { width: 100%; }
 }
 </style>
+
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\OrganizationForm.vue =====
 
@@ -3906,125 +4160,185 @@ export const API = 'http://localhost:8000';
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
-// Utils robustes pour particles.js (sans crash dans toutes les situations)
+// src/frontend/src/utils/particles.js
+// Utilities to safely use particles.js (Vincent Garreau) with Vue & theme switching
 
-export function ensurePJSDom() {
-    if (!Array.isArray(window.pJSDom)) window.pJSDom = []
+let _scriptPromise = null
+
+/**
+ * Load particles.js from CDN once.
+ * Resolves immediately if already present.
+ */
+export function loadParticlesScript () {
+  if (typeof window !== 'undefined' && window.particlesJS) {
+    return Promise.resolve()
   }
-  
-  export function loadParticlesScript() {
-    return new Promise((resolve, reject) => {
-      if (window.particlesJS) return resolve()
-      // DÃ©jÃ  injectÃ© ?
-      if ([...document.scripts].some(s => (s.src || '').includes('/particles/particles.min.js'))) {
-        // Attendre que particlesJS apparaisse
-        const iv = setInterval(() => {
-          if (window.particlesJS) { clearInterval(iv); resolve() }
-        }, 20)
-        setTimeout(() => { clearInterval(iv); resolve() }, 1000) // fail-soft
-        return
-      }
+  if (_scriptPromise) return _scriptPromise
+
+  _scriptPromise = new Promise((resolve, reject) => {
+    try {
       const s = document.createElement('script')
-      s.src = '/particles/particles.min.js'
+      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js'
       s.async = true
       s.onload = () => resolve()
-      s.onerror = async () => {
-        // Fallback CDN
-        const cdn = document.createElement('script')
-        cdn.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js'
-        cdn.async = true
-        cdn.onload = () => resolve()
-        cdn.onerror = () => reject(new Error('particles.js load failed'))
-        document.head.appendChild(cdn)
-      }
+      s.onerror = () => reject(new Error('Failed to load particles.js'))
       document.head.appendChild(s)
-    })
-  }
-  
-  export function destroyForId(id) {
-    const el = document.getElementById(id)
-    if (!el) return
-    const listBefore = Array.isArray(window.pJSDom) ? window.pJSDom : []
-    const entry = listBefore.find(d => d?.pJS?.canvas?.el?.parentElement === el)
-    try { entry?.pJS?.fn?.vendors?.destroypJS?.() } catch {}
-    const current = Array.isArray(window.pJSDom) ? window.pJSDom : listBefore
-    try {
-      window.pJSDom = current.filter(d => d?.pJS?.canvas?.el?.parentElement !== el)
-    } catch {
+    } catch (e) {
+      // not empty: log + reject
+      console.debug('[particles] creating script tag failed', e)
+      reject(e)
+    }
+  }).catch((e) => {
+    // not empty: log then rethrow for callers who care
+    console.debug('[particles] script load failed', e)
+    throw e
+  })
+
+  return _scriptPromise
+}
+
+/**
+ * Ensure the global pJSDom array exists (created by the lib).
+ */
+export function ensurePJSDom () {
+  try {
+    if (typeof window !== 'undefined' && !window.pJSDom) {
       window.pJSDom = []
     }
-    try { el.querySelectorAll('canvas').forEach(c => c.remove()) } catch {}
+  } catch (e) {
+    // not empty
+    console.debug('[particles] ensurePJSDom error', e)
   }
-  
-  export function hasContainer(id) {
-    return !!document.getElementById(id)
-  }
-  
-  export function themeIsDark() {
-    const de = document.documentElement
-    return de.getAttribute('data-theme') === 'dark' || de.classList.contains('dark')
-  }
-  
-  export function safeRender(id, config) {
-    const el = document.getElementById(id)
-    if (!el || !window.particlesJS) return false
-    ensurePJSDom()
-    destroyForId(id)
-    try {
-      window.particlesJS(id, config)
-      return true
-    } catch {
-      return false
-    }
-  }
-  
-  /**
-   * Observe les changements de thÃ¨me. Retourne une fonction "stop()" pour dÃ©brancher.
-   * Si le conteneur n'existe pas (page dÃ©montÃ©e), l'observer continue silencieusement,
-   * mais le render n'est appelÃ© que si le conteneur est prÃ©sent.
-   */
-  export function observeTheme(id, onThemeChange) {
-    const obs = new MutationObserver(muts => {
-      if (!hasContainer(id)) return
-      if (muts.some(m => m.attributeName === 'data-theme' || m.attributeName === 'class')) {
-        onThemeChange()
+}
+
+/**
+ * Destroy particles instance bound to a given container id.
+ */
+export function destroyForId (id) {
+  try {
+    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : []
+    for (let i = list.length - 1; i >= 0; i--) {
+      try {
+        const inst = list[i]
+        const el = inst?.pJS?.canvas?.el
+        const hostId =
+          (el && el.parentElement && el.parentElement.id) ||
+          inst?.tag?.id ||
+          null
+        if (hostId === id) {
+          const vendors = inst?.pJS?.fn?.vendors
+          if (vendors?.destroypJS) vendors.destroypJS()
+          if (vendors?.destroy) vendors.destroy()
+          list.splice(i, 1)
+        }
+      } catch (e) {
+        // not empty
+        console.debug('[particles] single destroy failed', e)
       }
-    })
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'class']
-    })
-    return () => obs.disconnect()
+    }
+  } catch (e) {
+    // not empty
+    console.debug('[particles] destroyForId failed', e)
   }
-  
-  /** Config par dÃ©faut, sensible au thÃ¨me */
-  export function defaultConfig(dark = themeIsDark()) {
-    return {
-      particles: {
-        number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: dark ? '#ffffff' : '#334155' },      // slate-700 en light
-        shape: { type: 'circle' },
-        opacity: { value: dark ? 0.5 : 0.55 },               // un poil plus visible en light
-        size: { value: 3, random: true },
-        line_linked: {
-          enable: true,
-          distance: 150,
-          color: dark ? '#ffffff' : '#475569',               // slate-600 en light
-          opacity: dark ? 0.4 : 0.45,
-          width: 1
-        },
-        move: { enable: true, speed: 3.6, direction: 'none', out_mode: 'bounce' }
-      },
-      interactivity: {
-        detect_on: 'canvas',
-        events: { onhover: { enable: true, mode: 'repulse' }, onclick: { enable: true, mode: 'push' }, resize: true },
-        modes: { repulse: { distance: 200 }, push: { particles_nb: 4 } }
-      },
-      retina_detect: true
+}
+
+/**
+ * Render particles into an element by id, defensively.
+ * Returns true on success, false if skipped (no elem or no lib).
+ */
+export function safeRender (id, config) {
+  try {
+    const el = typeof document !== 'undefined' ? document.getElementById(id) : null
+    if (!el) return false
+    if (typeof window === 'undefined' || !window.particlesJS) return false
+
+    destroyForId(id)
+    window.particlesJS(id, config)
+    return true
+  } catch (e) {
+    // not empty
+    console.debug('[particles] render failed', e)
+    return false
+  }
+}
+
+/**
+ * Observe theme changes (data-theme attr on <html>) and re-render particles.
+ * Returns a function to stop observing.
+ */
+export function observeTheme (id, renderFn) {
+  const target = typeof document !== 'undefined' ? document.documentElement : null
+  if (!target) return () => {}
+
+  const observer = new MutationObserver(() => {
+    try {
+      destroyForId(id)
+      renderFn?.()
+    } catch (e) {
+      // not empty
+      console.debug('[particles] theme change error', e)
+    }
+  })
+
+  try {
+    observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] })
+  } catch (e) {
+    // not empty
+    console.debug('[particles] observer start failed', e)
+  }
+
+  return () => {
+    try {
+      observer.disconnect()
+    } catch (e) {
+      // not empty
+      console.debug('[particles] observer cleanup failed', e)
     }
   }
-  
-  
+}
+
+/**
+ * Detect if current theme is dark based on data-theme attribute.
+ */
+export function themeIsDark () {
+  try {
+    const t = typeof document !== 'undefined'
+      ? document.documentElement.getAttribute('data-theme')
+      : null
+    return t !== 'light'
+  } catch (e) {
+    // not empty
+    console.debug('[particles] themeIsDark error', e)
+    return true
+  }
+}
+
+/**
+ * Minimal default config that adapts to theme.
+ */
+export function defaultConfig (isDark = true) {
+  const baseColor = isDark ? '#00c2c2' : '#0ea5a5'
+  const linkColor = isDark ? '#5eead4' : '#14b8a6'
+  const bgColor = isDark ? '#0e111a' : '#f6f8fb'
+
+  return {
+    particles: {
+      number: { value: 60, density: { enable: true, value_area: 800 } },
+      color: { value: baseColor },
+      shape: { type: 'circle' },
+      opacity: { value: 0.4, random: false },
+      size: { value: 3, random: true },
+      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
+      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
+    },
+    retina_detect: true,
+    background: { color: bgColor }
+  }
+}
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
 
