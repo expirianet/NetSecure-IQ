@@ -61,23 +61,6 @@ type OrganizationRequest struct {
 	UserID        string `json:"user_id"`
 }
 
-type OrganizationProfileResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Address      string `json:"address"`
-	VATNumber    string `json:"vat_number"`
-	ContactEmail string `json:"contact_email"`
-	ContactPhone string `json:"contact_phone"`
-}
-
-type UpdateOrganizationRequest struct {
-	Name         string `json:"name"`
-	Address      string `json:"address"`
-	VATNumber    string `json:"vat_number"`
-	ContactEmail string `json:"contact_email"`
-	ContactPhone string `json:"contact_phone"`
-}
-
 type RouterStatus struct {
 	MAC   string `json:"mac"`
 	Value string `json:"value"`
@@ -144,10 +127,6 @@ func main() {
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/ping", withCORS(handlePing))
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
-
-	// Organization endpoints
-	http.HandleFunc("/api/organization/profile", withCORS(jwtMiddleware(handleGetOrganizationProfile)))
-	http.HandleFunc("/api/organization/update", withCORS(jwtMiddleware(handleUpdateOrganization)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
@@ -163,13 +142,8 @@ func main() {
 
 	fmt.Println("🔐 JWT Secret:", jwtSecret)
 	fmt.Println("📦 Influx URL:", influxURL)
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8081"
-	}
-	addr := ":" + port
-	fmt.Printf("\n\n🚀 Server started at http://localhost%s (even if DB is down)\n", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	fmt.Println("🚀 Server started at http://localhost:8080 (even if DB is down)")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
@@ -347,10 +321,11 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func getOrganizationIDFromToken(r *http.Request) (string, error) {
+func handleProtected(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return "", fmt.Errorf("missing Authorization header")
+		http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+		return
 	}
 
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
@@ -361,33 +336,16 @@ func getOrganizationIDFromToken(r *http.Request) (string, error) {
 		return jwtSecret, nil
 	})
 	if err != nil || !token.Valid {
-		return "", fmt.Errorf("invalid token")
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", fmt.Errorf("invalid token claims")
-	}
-
-	orgID, ok := claims["organization_id"].(string)
-	if !ok || orgID == "" {
-		return "", fmt.Errorf("organization_id not found in token")
-	}
-
-	return orgID, nil
-}
-
-func handleProtected(w http.ResponseWriter, r *http.Request) {
-	orgID, err := getOrganizationIDFromToken(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Protected endpoint",
-		"organization_id": orgID,
-	})
+	json.NewEncoder(w).Encode(claims)
 }
 
 func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -466,136 +424,11 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(output)
 }
 
-// Structure pour la réponse de l'organisation
-type OrganizationResponse struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	Address       string  `json:"address"`
-	VATNumber     string  `json:"vat_number"`
-	State         string  `json:"state"`
-	City          string  `json:"city"`
-	ZipCode       string  `json:"zip_code"`
-	ContactEmail  string  `json:"contact_email"`
-	PecEmail      string  `json:"pec_email"`
-	SdiCode       string  `json:"sdi_code"`
-	ContactPhone  string  `json:"contact_phone"`
-	PersonnelInfo string  `json:"personnel_info"`
-	Manager       *User   `json:"manager,omitempty"`
-	Controller    *User   `json:"controller,omitempty"`
-	Processor     *User   `json:"processor,omitempty"`
-}
-
-type User struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Phone string `json:"phone"`
-}
-
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		handleCreateOrganization(w, r)
-	case http.MethodGet:
-		handleGetOrganization(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func handleGetOrganization(w http.ResponseWriter, r *http.Request) {
-	// Récupérer l'ID de l'utilisateur depuis le token JWT
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		http.Error(w, "Missing authorization token", http.StatusUnauthorized)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-
-	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-		return
-	}
-
-	userID, ok := claims["user_id"].(string)
-	if !ok {
-		http.Error(w, "Invalid user ID in token", http.StatusBadRequest)
-		return
-	}
-
-	// Récupérer l'organisation de l'utilisateur
-	var org OrganizationResponse
-	err = db.QueryRow(`
-		SELECT o.id, o.name, o.address, o.vat_number, o.state, o.city, 
-			o.zip_code, o.contact_email, o.pec_email, o.sdi_code, 
-			o.contact_phone, o.personnel_info
-		FROM organizations o
-		JOIN users u ON u.organization_id = o.id
-		WHERE u.id = $1
-	`, userID).Scan(
-		&org.ID, &org.Name, &org.Address, &org.VATNumber, &org.State, &org.City,
-		&org.ZipCode, &org.ContactEmail, &org.PecEmail, &org.SdiCode,
-		&org.ContactPhone, &org.PersonnelInfo,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Organization not found", http.StatusNotFound)
-		} else {
-			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Récupérer les utilisateurs avec des rôles spécifiques
-	rows, err := db.Query(`
-		SELECT u.first_name || ' ' || u.last_name as name, u.email, u.phone, u.role
-		FROM users u
-		WHERE u.organization_id = $1 AND u.role IN ('manager', 'controller', 'processor')
-	`, org.ID)
-
-	if err != nil {
-		http.Error(w, "Failed to fetch organization users: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name, email, phone, role string
-		if err := rows.Scan(&name, &email, &phone, &role); err != nil {
-			continue
-		}
-		
-		user := &User{
-			Name:  name,
-			Email: email,
-			Phone: phone,
-		}
-
-		switch role {
-		case "manager":
-			org.Manager = user
-		case "controller":
-			org.Controller = user
-		case "processor":
-			org.Processor = user
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(org)
-}
-
-func handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	var req OrganizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -636,120 +469,6 @@ func handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
-}
-
-func handleGetOrganizationProfile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	orgID, err := getOrganizationIDFromToken(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	var org OrganizationProfileResponse
-	err = db.QueryRow(`
-		SELECT id, name, address, vat_number, contact_email, contact_phone
-		FROM organizations
-		WHERE id = $1
-	`, orgID).Scan(
-		&org.ID,
-		&org.Name,
-		&org.Address,
-		&org.VATNumber,
-		&org.ContactEmail,
-		&org.ContactPhone,
-	)
-
-	if err == sql.ErrNoRows {
-		http.Error(w, "Organization not found", http.StatusNotFound)
-		return
-	} else if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(org)
-}
-
-func handleUpdateOrganization(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	orgID, err := getOrganizationIDFromToken(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	var req UpdateOrganizationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if req.Name == "" || req.Address == "" || req.VATNumber == "" || req.ContactEmail == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
-		return
-	}
-
-	// Update organization in database
-	result, err := db.Exec(`
-		UPDATE organizations
-		SET name = $1,
-		    address = $2,
-		    vat_number = $3,
-		    contact_email = $4,
-		    contact_phone = $5,
-		    updated_at = now()
-		WHERE id = $6
-	`, req.Name, req.Address, req.VATNumber, req.ContactEmail, req.ContactPhone, orgID)
-
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		http.Error(w, "Error checking update status", http.StatusInternalServerError)
-		return
-	}
-
-	if rowsAffected == 0 {
-		http.Error(w, "Organization not found", http.StatusNotFound)
-		return
-	}
-
-	// Return updated organization data
-	var org OrganizationProfileResponse
-	err = db.QueryRow(`
-		SELECT id, name, address, vat_number, contact_email, contact_phone
-		FROM organizations
-		WHERE id = $1
-	`, orgID).Scan(
-		&org.ID,
-		&org.Name,
-		&org.Address,
-		&org.VATNumber,
-		&org.ContactEmail,
-		&org.ContactPhone,
-	)
-
-	if err != nil {
-		http.Error(w, "Error fetching updated organization: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(org)
 }
 
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {
