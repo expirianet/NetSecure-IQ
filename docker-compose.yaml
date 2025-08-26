@@ -32,6 +32,8 @@ services:
     depends_on:
       - postgresql
       - influxdb
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   frontend:
     image: nginx:alpine
@@ -59,8 +61,33 @@ services:
       - "80:80"
     volumes:
       - mikrotik_data:/routeros
+
+  wireguard:
+    image: linuxserver/wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Rome
+      - SERVERPORT=55300
+      - PEERS=0
+      - PEERDNS=auto
+      - INTERNAL_SUBNET=10.100.99.0
+    ports:
+      - "55300:55300/udp"
+      - "9090:9090" # instead of 9090:9090
+    volumes:
+      - ./src/wireguard_config:/config
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+
 volumes:
   postgresql_data:
   influxdb_data:
   influxdb_config:
   mikrotik_data:
+  wireguard_config:
+
+
