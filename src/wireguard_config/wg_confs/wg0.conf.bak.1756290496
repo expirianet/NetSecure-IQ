@@ -7,3 +7,6 @@ PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACC
 
 
 
+[Peer]
+PublicKey = 1qkkFRh86Ty/qvnC6TZR9iejVtbZznay4yDkVPE2xDE=
+AllowedIPs = 10.100.99.10/32
