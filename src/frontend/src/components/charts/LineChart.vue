@@ -5,8 +5,8 @@
 </template>
 
 <script setup>
+import Chart from 'chart.js/auto' // auto-registers elements/scales/plugins
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import Chart from 'chart.js/auto'
 
 const props = defineProps({
   chartData: { type: Object, required: true },
