@@ -61,18 +61,26 @@ func JWT(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func GetUserID(r *http.Request) string {
-	if v := r.Context().Value(CtxUserID); v != nil { return v.(string) }
+	if v := r.Context().Value(CtxUserID); v != nil {
+		return v.(string)
+	}
 	return ""
 }
 func GetRoleName(r *http.Request) string {
-	if v := r.Context().Value(CtxRoleName); v != nil { return v.(string) }
+	if v := r.Context().Value(CtxRoleName); v != nil {
+		return v.(string)
+	}
 	return ""
 }
 func GetRoleID(r *http.Request) int {
-	if v := r.Context().Value(CtxRoleID); v != nil { return v.(int) }
+	if v := r.Context().Value(CtxRoleID); v != nil {
+		return v.(int)
+	}
 	return 0
 }
 func GetOrgID(r *http.Request) string {
-	if v := r.Context().Value(CtxOrganizationID); v != nil { return v.(string) }
+	if v := r.Context().Value(CtxOrganizationID); v != nil {
+		return v.(string)
+	}
 	return ""
 }

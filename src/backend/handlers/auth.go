@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	middleware "src/backend/middleware"
+	middleware "netsecure-backend/middleware"
 )
 
 type AuthMeSitePerm struct {

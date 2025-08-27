@@ -3,7 +3,7 @@ package rbac
 import (
 	"net/http"
 
-	"github.com/expirianet/NetSecure-IQ/backend/middleware"
+	"netsecure-backend/middleware"
 )
 
 // EnforceOperatorScope est un simple wrapper : les handlers appliquent le filtre

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	middleware "src/backend/middleware"
-	wireguard "src/backend/wireguard"
+	middleware "netsecure-backend/middleware"
+	wireguard "netsecure-backend/wireguard"
 )
 
 type AgentRow struct {

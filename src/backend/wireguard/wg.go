@@ -12,7 +12,9 @@ var ipCounter uint32 = 10 // start from .10
 func GenerateKeyPair() (privateKey, publicKey string, err error) {
 	// ⚠️ ceci n'est PAS une vraie clé WireGuard, mais OK pour un PoC côté FE.
 	priv := make([]byte, 32)
-	if _, err = rand.Read(priv); err != nil { return "", "", err }
+	if _, err = rand.Read(priv); err != nil {
+		return "", "", err
+	}
 	privateKey = base64.StdEncoding.EncodeToString(priv)
 	publicKey = base64.StdEncoding.EncodeToString(reverseBytes(priv))
 	return privateKey, publicKey, nil
@@ -21,7 +23,9 @@ func GenerateKeyPair() (privateKey, publicKey string, err error) {
 func reverseBytes(b []byte) []byte {
 	n := len(b)
 	out := make([]byte, n)
-	for i := 0; i < n; i++ { out[i] = b[n-1-i] }
+	for i := 0; i < n; i++ {
+		out[i] = b[n-1-i]
+	}
 	return out
 }
 

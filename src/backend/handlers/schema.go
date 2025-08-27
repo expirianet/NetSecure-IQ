@@ -28,7 +28,9 @@ func EnsureAgentSchema(db *sql.DB) error {
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	);
 	`)
-	if err != nil { return fmt.Errorf("create agents: %w", err) }
+	if err != nil {
+		return fmt.Errorf("create agents: %w", err)
+	}
 
 	// helpful index
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_org ON agents (organization_id);`)
