@@ -28,7 +28,7 @@ services:
       - ./config/backend_env/backend.env
     working_dir: /app
     ports:
-      - "8000:8080"
+      - "8081:8080" #first was 8000:8080
     depends_on:
       - postgresql
       - influxdb
@@ -40,7 +40,7 @@ services:
     volumes:
       - ./src/frontend/dist:/usr/share/nginx/html
     ports:
-      - "8081:80"
+      - "8080:80" #first was 8081:80
     depends_on:
       - backend
 
@@ -58,7 +58,7 @@ services:
       - "8729:8729" # API-SSL
       - "5900:5900" # VNC for GUI (optional)
       - "8291:8291" # Winbox
-      - "80:80"
+      - "8082:80"   #first was 80:80
     volumes:
       - mikrotik_data:/routeros
 
