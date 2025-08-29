@@ -22,6 +22,8 @@
                 <tr>
                   <th>MAC Address</th>
                   <th>Status</th>
+                  <th>Organization</th>
+                  <th>Site</th>
                   <th>Last Contact</th>
                 </tr>
               </thead>
@@ -29,7 +31,11 @@
                 <tr v-for="r in routers" :key="r.mac">
                   <td class="mono">{{ r.mac }}</td>
                   <td><span :class="['state', stateClass(r.status)]">{{ label(r.status) }}</span></td>
-                  <td>{{ formatDate(r.time) }}</td>
+                  <td>{{ r.organization }}</td>
+                  <td>{{ r.site }}</td>
+                  <td :title="new Date(r.time).toLocaleString()">
+                    {{ formatRelativeTime(r.time) }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -46,18 +52,25 @@
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
 const loading = ref(false)
 const error = ref('')
 
-function normalize(entry) {
+function normalize(router) {
+  // Vérifier si le routeur est en ligne (dernier contact < 5 minutes)
+  const lastSeen = new Date(router.last_seen || router.time || new Date().toISOString())
+  const minutesSinceLastSeen = (new Date() - lastSeen) / (1000 * 60)
+  const isOnline = minutesSinceLastSeen < 5
+  
   return {
-    mac: entry.mac || entry.mac_address || entry.MAC || '—',
-    status: (entry.status || entry.value || 'unknown').toString().toLowerCase(),
-    time: entry.time || entry.lastSeen || entry.timestamp || new Date().toISOString()
+    mac: router.mac || '—',
+    status: isOnline ? 'online' : 'offline',
+    time: router.last_seen || router.time || new Date().toISOString(),
+    organization: router.organization || '—',
+    site: router.site || '—',
+    site_id: router.site_id || null
   }
 }
 function label(s) {
@@ -70,27 +83,61 @@ function formatDate(iso) {
   try { return new Date(iso).toLocaleString() } catch { return '—' }
 }
 
+function formatRelativeTime(dateString) {
+  try {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffInSeconds = Math.floor((now - date) / 1000)
+    
+    if (diffInSeconds < 60) return 'Just now'
+    
+    const diffInMinutes = Math.floor(diffInSeconds / 60)
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`
+    
+    const diffInHours = Math.floor(diffInMinutes / 60)
+    if (diffInHours < 24) return `${diffInHours}h ago`
+    
+    const diffInDays = Math.floor(diffInHours / 24)
+    if (diffInDays < 30) return `${diffInDays}d ago`
+    
+    return date.toLocaleDateString()
+  } catch {
+    return '—'
+  }
+}
+
 async function loadRouters() {
   loading.value = true
   error.value = ''
   try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`${API}/api/data/routers`, {
-      headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-    }).catch(() => null)
-
-    if (!res || !res.ok) throw new Error('Showing demo data (API unavailable).')
-    const raw = await res.json()
-    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
-    routers.value = list.map(normalize)
+    const API_BASE_URL = 'http://localhost:8000/api'
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch routers')
+    
+    const data = await response.json()
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid response format')
+    }
+    
+    // Trier par statut (en ligne d'abord) puis par date de dernier contact
+    routers.value = data
+      .map(normalize)
+      .sort((a, b) => {
+        if (a.status === b.status) {
+          return new Date(b.time) - new Date(a.time)
+        }
+        return a.status === 'online' ? -1 : 1
+      })
+    
   } catch (e) {
-    // Demo data for display
-    routers.value = [
-      { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
-      { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
-      { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
-    ]
-    error.value = e.message || 'Unknown error.'
+    console.error('Failed to load routers:', e)
+    error.value = 'Failed to load router data. Please try again.'
+    // Garder les données existantes en cas d'erreur
+    if (!routers.value.length) {
+      routers.value = [
+        { mac: 'E4:8D:8C:AA:01:11', status: 'offline', time: new Date().toISOString() },
+      ]
+    }
   } finally {
     loading.value = false
   }
