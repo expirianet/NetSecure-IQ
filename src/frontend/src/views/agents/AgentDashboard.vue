@@ -1,4 +1,4 @@
-﻿<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
+<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
 <template>
   <div class="agents-page">
     <!-- Background particles -->
@@ -83,8 +83,21 @@
                   <td>{{ a.site || '—' }}</td>
                 </tr>
 
-                <tr v-if="!filteredAgents.length">
-                  <td colspan="5" class="empty">No agents match your search.</td>
+                <tr v-if="isLoading">
+                  <td colspan="5" class="empty">
+                    <i class="fas fa-spinner fa-spin"></i> Loading agents...
+                  </td>
+                </tr>
+                <tr v-else-if="error">
+                  <td colspan="5" class="empty error">
+                    <i class="fas fa-exclamation-circle"></i> {{ error }}
+                  </td>
+                </tr>
+                <tr v-else-if="!filteredAgents.length">
+                  <td colspan="5" class="empty">
+                    <span v-if="query">No agents match your search.</span>
+                    <span v-else>No agents found. <a href="#" @click.prevent="$router.push('/agents/register')">Register a new agent</a></span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -100,14 +113,43 @@
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
-/** Demo data (wire to your API when available) */
-const agents = ref([
-  { mac: 'AA:BB:CC:DD:EE:01', status: 'associated',   organization: 'Org1', site: 'SiteA' },
-  { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated', organization: '',     site: ''     },
-  { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated',  organization: 'Org2', site: ''     }
-])
+// API base URL
+const API_BASE_URL = 'http://localhost:8000/api'
+
+// Agents data
+const agents = ref([])
+const isLoading = ref(true)
+const error = ref(null)
+
+// Fetch agents from API
+const fetchAgents = async () => {
+  try {
+    isLoading.value = true
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch')
+    const data = await response.json()
+    agents.value = data.map(device => ({
+      mac: device.mac,
+      status: device.status || 'unassociated',
+      organization: device.organization || '',
+      site: device.site || '',
+      site_id: device.site_id || ''
+    }))
+  } catch (err) {
+    console.error('Failed to fetch agents:', err)
+    error.value = 'Failed to load agents. Please try again.'
+    showToast('Failed to load agents', 'error')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Initialize component
+onMounted(() => {
+  fetchAgents()
+})
 
 /** Search & selection */
 const query = ref('')
@@ -138,22 +180,81 @@ const showToast = (msg, type = 'success') => {
   setTimeout(() => (toast.value = ''), 2200)
 }
 
-function onAssociate() {
+async function onAssociate() {
   if (!selectedAgent.value) return
-  selectedAgent.value.status = 'associated'
-  showToast('Agent associated.')
+  
+  try {
+    const siteId = prompt('Enter Site ID to associate with this agent:')
+    if (!siteId) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/associate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac,
+        site_id: siteId
+      })
+    })
+    if (!response.ok) throw new Error('Association failed')
+    
+    await fetchAgents()
+    showToast('Agent associated successfully')
+  } catch (err) {
+    console.error('Association failed:', err)
+    showToast('Failed to associate agent', 'error')
+  }
 }
-function onDeactivate() {
+async function onDeactivate() {
   if (!selectedAgent.value) return
-  selectedAgent.value.status = 'deactivated'
-  showToast('Agent deactivated.', 'error')
+  
+  try {
+    const confirmDeactivate = confirm(`Are you sure you want to deactivate agent ${selectedAgent.value.mac}?`)
+    if (!confirmDeactivate) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/disable`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac
+      })
+    })
+    if (!response.ok) throw new Error('Deactivation failed')
+    
+    await fetchAgents()
+    showToast('Agent deactivated', 'success')
+  } catch (err) {
+    console.error('Deactivation failed:', err)
+    showToast('Failed to deactivate agent', 'error')
+  }
 }
-function onDelete() {
+async function onDelete() {
   if (!selectedAgent.value) return
-  agents.value = agents.value.filter((_, i) => i !== selectedIndex.value)
-  selectedAgent.value = null
-  selectedIndex.value = -1
-  showToast('Agent deleted.', 'error')
+  
+  try {
+    const confirmDelete = confirm(`Are you sure you want to delete agent ${selectedAgent.value.mac}? This action cannot be undone.`)
+    if (!confirmDelete) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mac: selectedAgent.value.mac })
+    })
+    if (!response.ok) throw new Error('Deletion failed')
+    
+    await fetchAgents()
+    selectedAgent.value = null
+    selectedIndex.value = -1
+    showToast('Agent deleted successfully', 'success')
+  } catch (err) {
+    console.error('Deletion failed:', err)
+    showToast('Failed to delete agent', 'error')
+  }
 }
 
 /** Display helpers */
