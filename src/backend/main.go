@@ -26,17 +26,22 @@ import (
 	"gopkg.in/gomail.v2"
 )
 
-var db *sql.DB
-var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
-
+// ======================================================
+// Globals (valeurs affectées dans main() après Load .env)
+// ======================================================
 var (
-	influxToken  = os.Getenv("INFLUXDB_TOKEN")
-	influxBucket = os.Getenv("INFLUXDB_BUCKET")
-	influxOrg    = os.Getenv("INFLUXDB_ORG")
-	influxURL    = os.Getenv("INFLUXDB_URL")
+	db          *sql.DB
+	jwtSecret   []byte
+	influxToken string
+	influxBucket string
+	influxOrg   string
+	influxURL   string
 	influxClient influxdb2.Client
 )
 
+// ======================
+// Request/Model structs
+// ======================
 type RegisterRequest struct {
 	Email string `json:"email"`
 }
@@ -77,7 +82,7 @@ type CreateUserRequest struct {
 	FirstName      string  `json:"first_name"`
 	LastName       string  `json:"last_name"`
 	OrganizationID *string `json:"organization_id"`
-	Role           string  `json:"role"` // <-- Add this field
+	Role           string  `json:"role"`
 }
 
 type MikroTikRegisterRequest struct {
@@ -85,44 +90,100 @@ type MikroTikRegisterRequest struct {
 	SiteID *string `json:"site_id"` // Optional for now
 }
 
-//var org OrganizationRequest
+// =================================
+// Bootstrap helpers (env + clients)
+// =================================
 
-func main() {
-	if err := godotenv.Load("../../config/backend_env/backend.env"); err != nil {
-		log.Println("⚠️ .env file not found at custom path — using system env vars")
+func loadEnv() {
+	// Essaie d'abord ./.env puis le chemin custom existant
+	if err := godotenv.Load(".env"); err != nil {
+		if err2 := godotenv.Load("../../config/backend_env/backend.env"); err2 != nil {
+			log.Println("⚠️ .env not found in standard or custom path — using system env vars only")
+		} else {
+			log.Println("✅ Loaded env from ../../config/backend_env/backend.env")
+		}
+	} else {
+		log.Println("✅ Loaded env from .env")
 	}
+}
 
-	var err error
-
+func initPostgres() {
 	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
 	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
+	pass := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 
-	if host == "" || user == "" || password == "" || dbname == "" {
-		log.Println("⚠️ One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
-	} else if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
-		log.Println("⚠️ InfluxDB environment variables are missing or incomplete.")
-	} else {
-		connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
-		db, err = sql.Open("postgres", connStr)
-		if err != nil {
-			log.Println("❌ Failed to open DB connection:", err)
-		} else if err = db.Ping(); err != nil {
-			log.Println("❌ Database connection test failed:", err)
-		} else {
-			fmt.Println("✅ Connected to PostgreSQL successfully")
-		}
-
-		influxClient = influxdb2.NewClient(influxURL, influxToken)
-		fmt.Println("✅ Connected to InfluxDB")
-		defer influxClient.Close()
+	if host == "" || port == "" || user == "" || pass == "" || dbname == "" {
+		log.Println("⚠️ Missing PostgreSQL env vars: POSTGRES_HOST/PORT/USER/PASSWORD/DB — DB features will be disabled")
+		return
 	}
 
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, pass, dbname,
+	)
+
+	var err error
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		log.Println("❌ Failed to open DB:", err)
+		return
+	}
+	if err := db.Ping(); err != nil {
+		log.Println("❌ Failed to connect to DB:", err)
+		db = nil
+		return
+	}
+	log.Println("✅ Connected to PostgreSQL successfully")
+}
+
+func initInflux() {
+	influxToken = os.Getenv("INFLUXDB_TOKEN")
+	influxBucket = os.Getenv("INFLUXDB_BUCKET")
+	influxOrg = os.Getenv("INFLUXDB_ORG")
+	influxURL = os.Getenv("INFLUXDB_URL")
+
+	if influxToken == "" || influxBucket == "" || influxOrg == "" || influxURL == "" {
+		log.Println("⚠️ InfluxDB env vars missing or incomplete — Influx features will be disabled")
+		return
+	}
+	influxClient = influxdb2.NewClient(influxURL, influxToken)
+	log.Println("✅ InfluxDB client initialized")
+}
+
+// Quick guards to avoid panics if DB/Influx not initialized
+func requireDB(w http.ResponseWriter) bool {
+	if db == nil {
+		http.Error(w, "Database not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+func requireInflux(w http.ResponseWriter) bool {
+	if influxClient == nil {
+		http.Error(w, "InfluxDB not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// =====
+// main
+// =====
+func main() {
+	loadEnv()
+
+	// Charger secrets après loadEnv()
+	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
-		log.Println("⚠️ JWT_SECRET environment variable is not set — JWT will not work properly")
+		log.Println("⚠️ JWT_SECRET is not set — JWT will not work properly")
 	}
 
+	initPostgres()
+	initInflux()
+
+	// Routes
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/ping", withCORS(handlePing))
@@ -131,7 +192,7 @@ func main() {
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
-	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump)) // GET, ROS metrics dump
+	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump))
 	http.HandleFunc("/api/mikrotik/preregister", withCORS(handleMikrotikPreRegister))
 	http.HandleFunc("/api/mikrotik/list", withCORS(handleMikrotikList))
 	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
@@ -140,29 +201,41 @@ func main() {
 	http.HandleFunc("/api/mikrotik/associate", withCORS(handleMikrotikAssociate))
 	http.HandleFunc("/api/mikrotik", withCORS(handleMikrotikDelete)) // DELETE
 
-	fmt.Println("🔐 JWT Secret:", jwtSecret)
+	// Logs startup
+	masked := "<empty>"
+	if len(jwtSecret) > 0 {
+		masked = fmt.Sprintf("•••(%d bytes)", len(jwtSecret))
+	}
+	fmt.Println("🔐 JWT Secret:", masked)
 	fmt.Println("📦 Influx URL:", influxURL)
-	fmt.Println("🚀 Server started at http://localhost:8000 (even if DB is down)")
+	fmt.Println("🚀 Server started at http://localhost:8000 (even if DB/Influx are down)")
+
 	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
+// =======
+// Helpers
+// =======
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Log request
+		fmt.Printf("📡 [%s] %s %s\n", time.Now().Format("15:04:05"), r.Method, r.URL.Path)
+		fmt.Println("📦 Headers:", r.Header)
+
 		origin := r.Header.Get("Origin")
-		fmt.Println("📦 Origin:", origin) // 👈 Add this line
+		fmt.Println("🌐 Origin:", origin)
 		allowedOrigins := []string{
 			"http://localhost:8080",
 			"http://localhost:8081",
 			"http://localhost:8082",
+			"http://localhost:8000",
 		}
-
 		for _, o := range allowedOrigins {
 			if origin == o {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				break
 			}
 		}
-
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -173,9 +246,15 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// ==================
+// Auth & User Routes
+// ==================
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -203,7 +282,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error": "Database insert failed: " + err.Error(),
 		})
 		return
@@ -229,7 +308,7 @@ Please log in and complete your profile.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User registered successfully. Check your email.",
 	})
 }
@@ -237,6 +316,9 @@ Please log in and complete your profile.
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -289,36 +371,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		resp["organization_id"] = nil
 	}
 
-	json.NewEncoder(w).Encode(resp)
-}
-
-func handlePing(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var data MikroTikData
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	fmt.Printf("📡 Ping received: %+v\n", data)
-
-	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
-
-	p := influxdb2.NewPointWithMeasurement("device_status").
-		AddTag("mac", data.MAC).
-		AddField("status", data.Status).
-		SetTime(time.Now())
-
-	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
-		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +398,7 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
-	json.NewEncoder(w).Encode(claims)
+	_ = json.NewEncoder(w).Encode(claims)
 }
 
 func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -355,7 +408,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
 			return
 		}
-
 		const prefix = "Bearer "
 		if len(authHeader) <= len(prefix) || authHeader[:len(prefix)] != prefix {
 			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
@@ -363,7 +415,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		tokenString := authHeader[len(prefix):]
-
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -374,14 +425,48 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-
 		next(w, r)
 	}
+}
+
+// ==================
+// Influx data routes
+// ==================
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
+		return
+	}
+
+	var data MikroTikData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("📡 Ping received: %+v\n", data)
+
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
+	p := influxdb2.NewPointWithMeasurement("device_status").
+		AddTag("mac", data.MAC).
+		AddField("status", data.Status).
+		SetTime(time.Now())
+
+	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleRouters(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
 		return
 	}
 
@@ -401,7 +486,6 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var output []RouterStatus
-
 	for result.Next() {
 		record := result.Record()
 		mac := record.ValueByKey("mac")
@@ -414,19 +498,24 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 			Time:  record.Time().Format(time.RFC3339),
 		})
 	}
-
 	if result.Err() != nil {
 		http.Error(w, "Influx parse error: "+result.Err().Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(output)
+	_ = json.NewEncoder(w).Encode(output)
 }
 
+// ===========================
+// Organization & User routes
+// ===========================
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -435,7 +524,6 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	fmt.Printf("📥 Received OrganizationRequest:\n%+v\n", req)
 
 	var orgID string
@@ -452,20 +540,18 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	`, req.Name, req.Address, req.VATNumber, req.State, req.City, req.ZipCode,
 		req.ContactEmail, req.PecEmail, req.SdiCode, req.ContactPhone,
 		req.PersonnelInfo).Scan(&orgID)
-
 	if err != nil {
 		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
-
 	if err != nil {
 		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
@@ -476,13 +562,15 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
 
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
@@ -496,7 +584,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	case "operator":
 		roleID = 2
 	default:
-		roleID = 3 // default to User
+		roleID = 3 // default User
 	}
 
 	// Generate and hash password
@@ -505,7 +593,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
@@ -517,7 +604,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
     INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, now(), now())
   `, req.Email, string(hash), roleID, req.FirstName, req.LastName, req.OrganizationID)
-
 	if err != nil {
 		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -544,12 +630,14 @@ Please log in and change your password as soon as possible.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User created and password emailed",
 	})
 }
 
-// Connects to MikroTik RouterOS API and fetches system resource info
+// ============================================
+// MikroTik (resource + dump via MikroTik REST)
+// ============================================
 func getMikrotikSystemResource() (map[string]interface{}, error) {
 	host := os.Getenv("MIKROTIK_HOST")
 	port := os.Getenv("MIKROTIK_PORT")
@@ -565,7 +653,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-
 	req.SetBasicAuth(user, pass)
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -583,7 +670,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
-
 	return data, nil
 }
 
@@ -599,13 +685,12 @@ func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Print the response to console for debugging
 	fmt.Println("📦 MikroTik REST API Response:")
 	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
 	fmt.Println(string(prettyJSON))
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func getAllMikrotikMetricsAsText() (string, error) {
@@ -651,12 +736,11 @@ func getAllMikrotikMetricsAsText() (string, error) {
 
 		builder.WriteString(fmt.Sprintf("===== %s =====\n", label))
 
-		// Attempt pretty JSON print
 		var prettyJSON bytes.Buffer
 		if json.Indent(&prettyJSON, body, "", "  ") == nil {
 			builder.Write(prettyJSON.Bytes())
 		} else {
-			builder.Write(body) // fallback
+			builder.Write(body)
 		}
 		builder.WriteString("\n\n")
 	}
@@ -677,22 +761,18 @@ func handleMikrotikDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(result))
+	_, _ = w.Write([]byte(result))
 }
 
-//-------------------------------------------------
+// -------------------------------------------------
 // WireGuard pre-registration for MikroTik routers
-//-------------------------------------------------
-
-// WireGuard IP Pool
+// -------------------------------------------------
 var (
 	wireguardSubnet = "10.100.99.0/24"
 	startOffset     = 10
 )
 
-// Generates real WireGuard keys using wg tool
 func generateRealWGKeys() (string, string, error) {
-	// Run "wg genkey"
 	privateCmd := exec.Command("wg", "genkey")
 	privateOut := &bytes.Buffer{}
 	privateCmd.Stdout = privateOut
@@ -701,7 +781,6 @@ func generateRealWGKeys() (string, string, error) {
 	}
 	privateKey := bytes.TrimSpace(privateOut.Bytes())
 
-	// Run "wg pubkey"
 	pubCmd := exec.Command("wg", "pubkey")
 	pubCmd.Stdin = bytes.NewReader(privateKey)
 	pubOut := &bytes.Buffer{}
@@ -714,19 +793,20 @@ func generateRealWGKeys() (string, string, error) {
 	return string(privateKey), string(publicKey), nil
 }
 
-// Assigns next available IP from pool
 func getNextAvailableIP() (string, error) {
 	_, ipnet, err := net.ParseCIDR(wireguardSubnet)
 	if err != nil {
 		return "", fmt.Errorf("invalid subnet: %w", err)
 	}
-
 	baseIP := ipnet.IP.To4()
 	if baseIP == nil {
 		return "", fmt.Errorf("not a valid IPv4 subnet")
 	}
 
-	// Step 1: Load all currently assigned IPs from DB
+	if db == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+
 	rows, err := db.Query(`SELECT vpn_internal_ip FROM mikrotik_routers`)
 	if err != nil {
 		return "", fmt.Errorf("failed to query IPs from database: %w", err)
@@ -736,27 +816,23 @@ func getNextAvailableIP() (string, error) {
 	usedIPs := make(map[string]bool)
 	for rows.Next() {
 		var ipStr string
-		if err := rows.Scan(&ipStr); err == nil {
+		if err := rows.Scan(&ipStr); err == nil && ipStr != "" {
 			usedIPs[ipStr] = true
 		}
 	}
 
-	// Step 2: Iterate over IP pool starting from .10
 	for i := startOffset; i < 255; i++ {
 		candidateIP := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(i)).String()
 		if !usedIPs[candidateIP] {
 			return candidateIP, nil
 		}
 	}
-
 	return "", fmt.Errorf("no available IPs in subnet")
 }
 
-// MikroTik registration logic
 func MikroTikPreRegister(mac string) (map[string]string, error) {
 	fmt.Println("🔧 Starting MikroTik registration for MAC:", mac)
 
-	// Step 1: Generate WireGuard keys
 	privateKey, publicKey, err := generateRealWGKeys()
 	if err != nil {
 		return nil, fmt.Errorf("key generation failed: %w", err)
@@ -765,24 +841,20 @@ func MikroTikPreRegister(mac string) (map[string]string, error) {
 	fmt.Println("🔑 Private Key:", privateKey)
 	fmt.Println("🔐 Public Key:", publicKey)
 
-	// Step 2: Assign IP
 	ip, err := getNextAvailableIP()
 	if err != nil {
 		return nil, fmt.Errorf("IP allocation failed: %w", err)
 	}
 	fmt.Println("✅ Assigned IP:", ip)
 
-	// Step 3: Generate MikroTik config
 	mikrotikConfig := generateMikroTikConfig(privateKey, ip)
 	fmt.Println("📄 MikroTik Configuration Script:\n", mikrotikConfig)
 
-	// Step 4: Generate server-side peer config
 	serverConf := fmt.Sprintf(`[Peer]
 PublicKey = %s
 AllowedIPs = %s/32`, publicKey, ip)
 	fmt.Println("📄 WireGuard Peer (Server) Config:\n", serverConf)
 
-	// Step 5: Store into DB
 	_, err = db.Exec(`
 		INSERT INTO mikrotik_routers (
 			id, site_id, mac_address,
@@ -801,7 +873,6 @@ AllowedIPs = %s/32`, publicKey, ip)
 		return nil, fmt.Errorf("database insert failed: %w", err)
 	}
 
-	// Step 6: Build return object
 	result := map[string]string{
 		"internal_ip":     ip,
 		"private_key":     privateKey,
@@ -812,9 +883,7 @@ AllowedIPs = %s/32`, publicKey, ip)
 
 	if err := addWireGuardPeer(publicKey, ip); err != nil {
 		log.Println("⚠️ Could not add peer to WireGuard:", err)
-		// You can still return success here — the router will connect once wg0 is restarted or manually updated
 	}
-
 	return result, nil
 }
 
@@ -825,43 +894,9 @@ func generateMikroTikConfig(privateKey, ip string) string {
 		privateKey, ip)
 }
 
-func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MikroTikRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// 🛑 Check for duplicates
-	var exists bool
-	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists)
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if exists {
-		http.Error(w, "MAC already registered", http.StatusConflict)
-		return
-	}
-
-	// ✅ Call MikroTikPreRegister and get config data
-	data, err := MikroTikPreRegister(req.MAC)
-	if err != nil {
-		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// ✅ Return JSON with config
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// Reuse your existing container name
+// =====================
+// MikroTik HTTP routes
+// =====================
 const wgContainer = "netsecure-iq-wireguard-1"
 
 type MikroTikRow struct {
@@ -872,8 +907,10 @@ type MikroTikRow struct {
 	Status string // provisioning_status
 }
 
-// Look up a router by MAC
 func getRouterByMAC(mac string) (*MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	row := db.QueryRow(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip, 
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -891,8 +928,10 @@ func getRouterByMAC(mac string) (*MikroTikRow, error) {
 	return &r, nil
 }
 
-// List all routers (for dashboard)
 func listRouters() ([]MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	rows, err := db.Query(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip,
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -920,9 +959,7 @@ func listRouters() ([]MikroTikRow, error) {
 	return out, nil
 }
 
-// Add/remove peer inside the WireGuard container and persist to config file
 func addWireGuardPeer(publicKey, ip string) error {
-	// 1) Apply live (keeps current session working)
 	cmd := exec.Command("docker", "exec", wgContainer,
 		"wg", "set", "wg0",
 		"peer", publicKey,
@@ -931,7 +968,6 @@ func addWireGuardPeer(publicKey, ip string) error {
 		return fmt.Errorf("wg add peer failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 2) Persist to /config/wg0.conf with real newlines (avoid adding duplicates)
 	script := fmt.Sprintf(`
 if ! grep -q "PublicKey = %s" /config/wg_confs/wg0.conf; then
   cat <<'EOF' >> /config/wg_confs/wg0.conf
@@ -947,14 +983,12 @@ fi
 	if out, err := appendCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to append peer to /config/wg_confs/wg0.conf: %v\nOutput: %s", err, string(out))
 	}
-
 	return nil
 }
 
 func removeWireGuardPeer(publicKey string) error {
 	cfgPath := "/config/wg_confs/wg0.conf"
 
-	// 1) Remove from live session
 	{
 		cmd := exec.Command("docker", "exec", wgContainer,
 			"wg", "set", "wg0", "peer", publicKey, "remove")
@@ -963,7 +997,6 @@ func removeWireGuardPeer(publicKey string) error {
 		}
 	}
 
-	// 2) Remove from persisted config (no backups, minimal logging)
 	script := fmt.Sprintf(`
 set -e
 CFG="%s"
@@ -999,18 +1032,15 @@ mv "${CFG}.tmp" "$CFG"
 	if out, err := removeCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove peer from %s: %v\nOutput:\n%s", cfgPath, err, string(out))
 	}
-
 	return nil
 }
 
-// Ping from inside WireGuard container to the router's internal IP
 func pingFromWireGuard(ip string) error {
 	cmd := exec.Command("docker", "exec", wgContainer, "sh", "-c",
 		fmt.Sprintf("ping -c 1 -W 2 %s >/dev/null 2>&1", ip))
 	return cmd.Run() // nil == success
 }
 
-// Helper for status label used by frontend (Associated/Unassociated/Deactivated)
 func uiStatus(r MikroTikRow) string {
 	if strings.EqualFold(r.Status, "DISABLED") || strings.EqualFold(r.Status, "DEACTIVATED") {
 		return "Deactivated"
@@ -1021,11 +1051,50 @@ func uiStatus(r MikroTikRow) string {
 	return "Unassociated"
 }
 
+func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
+		return
+	}
+
+	var req MikroTikRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Duplicate check
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "MAC already registered", http.StatusConflict)
+		return
+	}
+
+	data, err := MikroTikPreRegister(req.MAC)
+	if err != nil {
+		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(data)
+}
+
 func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	items, err := listRouters()
 	if err != nil {
 		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
@@ -1048,7 +1117,7 @@ func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 type testReq struct {
@@ -1060,6 +1129,10 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req testReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1074,7 +1147,7 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 	err = pingFromWireGuard(rtr.IP)
 	resp := map[string]any{"ok": err == nil}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type macReq struct {
@@ -1086,6 +1159,10 @@ func handleMikrotikDisable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1114,6 +1191,10 @@ func handleMikrotikEnable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1147,6 +1228,10 @@ func handleMikrotikAssociate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req associateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" || req.SiteID == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1165,6 +1250,10 @@ func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only DELETE allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
