@@ -21,7 +21,7 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'home-particles'
 let stopObs = () => {}

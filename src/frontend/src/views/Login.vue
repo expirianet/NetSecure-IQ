@@ -20,7 +20,7 @@
 defineOptions({ name: 'LoginPage' })
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore } from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')

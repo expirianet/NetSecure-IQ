@@ -27,7 +27,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 
 const email = ref('')
 const firstName = ref('')

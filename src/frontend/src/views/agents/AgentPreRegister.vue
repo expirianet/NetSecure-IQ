@@ -93,7 +93,7 @@
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -115,7 +115,7 @@ function formatMac() {
 }
 const macValid = computed(() => /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac.value))
 
-import { preregister } from '@/utils/agentsApi.js'
+import { preregister } from '@/appCore.js'
 
 async function submit() {
   if (!macValid.value) return showToast('Invalid MAC address', false)

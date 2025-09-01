@@ -7,7 +7,7 @@ import { onMounted, onUnmounted } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'bg-particles'
 let stopObs = () => {}

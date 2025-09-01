@@ -154,11 +154,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 /* ---------- Champs ---------- */
 const firstName = ref('')

@@ -162,7 +162,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/utils/agentsApi.js'
+import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
 
 /* ---------- State ---------- */
 const agents = ref([])           // Données des agents du backend

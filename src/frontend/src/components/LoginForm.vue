@@ -1,6 +1,6 @@
-ï»¿<template>
+<template>
   <div class="login-page">
-    <!-- Canvas animÃ© -->
+    <!-- Canvas animé -->
     <div id="login-particles"></div>
 
     <!-- Formulaire de login -->
@@ -48,12 +48,12 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../composables/useAuth'
-import { API } from '@/utils/api.js'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')
@@ -63,7 +63,7 @@ const loading = ref(false)
 const router = useRouter()
 const { login: setAuthLogin } = useAuth()
 
-/* Particles (sÃ©curisÃ©) */
+/* Particles (sécurisé) */
 const ID = 'login-particles'
 let stopObs = () => {}
 function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
@@ -143,7 +143,7 @@ const login = async () => {
   --success: #22c55e;
 }
 
-/* Page entiÃ¨re */
+/* Page entière */
 .login-page { position: relative; min-height: 100vh; overflow: hidden; }
 
 /* Canvas particles */

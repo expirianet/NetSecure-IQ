@@ -89,7 +89,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const CONTAINER_ID = 'org-particles'
 let stopObs = () => {}

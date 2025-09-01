@@ -1,4 +1,4 @@
-﻿<!-- src/frontend/src/components/TopNavigationOperator.vue -->
+<!-- src/frontend/src/components/TopNavigationOperator.vue -->
 <template>
   <nav class="navbar">
     <!-- Left: brand + links -->
@@ -72,15 +72,15 @@
         @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()

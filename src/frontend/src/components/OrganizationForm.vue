@@ -76,11 +76,11 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const router = useRouter()
 const message = ref('')

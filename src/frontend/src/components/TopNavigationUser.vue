@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()

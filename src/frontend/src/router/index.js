@@ -10,7 +10,7 @@ import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
 import DashboardOperator from '@/components/DashboardOperator.vue'
 
-import { useAuth } from '../composables/useAuth'
+import { useAuth } from '../appCore.js'
 
 const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
 const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
