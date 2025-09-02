@@ -1,4 +1,4 @@
-<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
+﻿<!-- src/frontend/src/components/agents/AgentDashboard.vue -->
 <template>
   <div class="agents-page">
     <!-- Background particles -->
@@ -79,8 +79,8 @@
                   <td>
                     <span :class="['state', stateClass(a.status)]">{{ label(a.status) }}</span>
                   </td>
-                  <td>{{ a.organization || '—' }}</td>
-                  <td>{{ a.site || '—' }}</td>
+                  <td>{{ a.organization || 'â€”' }}</td>
+                  <td>{{ a.site || 'â€”' }}</td>
                 </tr>
 
                 <tr v-if="isLoading">
@@ -405,3 +405,4 @@ function rowTint(status) {
   .legend { justify-self: start; }
 }
 </style>
+

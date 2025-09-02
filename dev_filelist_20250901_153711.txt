@@ -1,17 +1,23 @@
 ﻿
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
 
+# path: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env
+
+# --- PostgreSQL ---
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=yourpassword
 POSTGRES_DB=netsecure
-POSTGRES_HOST=127.0.0.1
+POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
+
+# --- JWT ---
 JWT_SECRET=your-secret-key-change-this-in-production
+
+# --- InfluxDB ---
 INFLUXDB_URL=http://localhost:8086
 INFLUXDB_TOKEN=your-influxdb-token
 INFLUXDB_ORG=your-org
 INFLUXDB_BUCKET=netsecure
-
 
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
@@ -1452,6 +1458,235 @@ body {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
+// src/frontend/src/appCore.js
+// Fusion de tous les utilitaires, stores, composables, helpers, API
+
+// ---- API base & HTTP helper ----
+export const API = (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') || 'http://localhost:8000';
+const defaultHeaders = { 'Content-Type': 'application/json' };
+export const authHeaders = () => {
+  const t = localStorage.getItem('token');
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+async function http(method, path, body, extraHeaders = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* no json body */ }
+  if (!res.ok) {
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+export const api = {
+  get: (p, h) => http('GET', p, undefined, h),
+  post: (p, b, h) => http('POST', p, b, h),
+  del: (p, b, h) => http('DELETE', p, b, h),
+};
+// ---- Domain APIs ----
+export const authApi = {
+  login: (email, password) => api.post('/api/login', { email, password }),
+  register: (email) => api.post('/api/register', { email }),
+  createUser: (payload) => api.post('/api/users', payload),
+  completeOrganization: (payload) => api.post('/api/complete-organization', payload),
+  async getCurrentUser() {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    const response = await fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!response.ok) throw new Error('Failed to fetch user');
+    return response.json();
+  }
+};
+export const agentsApi = {
+  list: () => api.get('/api/mikrotik/list'),
+  preregister: (mac, siteId = null) => api.post('/api/mikrotik/preregister', siteId ? { mac, site_id: siteId } : { mac }),
+  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),
+  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),
+  remove: (mac) => api.del('/api/mikrotik', { mac }),
+  test: (mac) => api.post('/api/mikrotik/test', { mac }),
+  associate: (mac, siteId) => api.post('/api/mikrotik/associate', { mac, site_id: siteId }),
+  delete: (mac) => api.post('/api/mikrotik/delete', { mac }),
+};
+
+// ---- Auth composable ----
+import { ref, computed } from 'vue';
+export const isAuthenticated = ref(!!localStorage.getItem('token'));
+export function login() { isAuthenticated.value = true; }
+export function logout() {
+  isAuthenticated.value = false;
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('organization_id');
+  localStorage.removeItem('user_id');
+  window.dispatchEvent(new Event('auth-changed'));
+  window.location.replace('/#/login');
+}
+export function useAuth() {
+  return { isAuthenticated, login, logout };
+}
+
+// ---- Pinia Auth Store ----
+import { defineStore } from 'pinia';
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(localStorage.getItem('token') || '');
+  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'));
+  const isAuthenticatedStore = computed(() => !!token.value);
+  const role = computed(() => user.value?.role || null);
+  function setAuth(newToken, newUser) {
+    token.value = newToken;
+    user.value = newUser;
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  }
+  function logoutStore() {
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+  return { token, user, isAuthenticated: isAuthenticatedStore, role, setAuth, logout: logoutStore };
+});
+
+// ---- Pinia Site Store ----
+export const useSiteStore = defineStore('site', {
+  state: () => ({ sites: [] }),
+  actions: {
+    async fetchSites() {
+      const auth = useAuthStore();
+      let url = '/api/sites';
+      this.sites = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } }).then(r => r.json());
+    }
+  },
+  getters: {
+    filteredSites(state) {
+      const auth = useAuthStore();
+      if (auth.role === 'Administrator') return state.sites;
+      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id);
+      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id));
+      return [];
+    }
+  }
+});
+
+// ---- ACL Helper ----
+export function can(user, needed) {
+  if (!user) return false;
+  const perms = new Set((user.permissions || []).map(String));
+  const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
+  return list.every(p => perms.has(String(p)));
+}
+export default can;
+
+// ---- Particles Utils ----
+let _scriptPromise = null;
+export function loadParticlesScript () {
+  if (typeof window !== 'undefined' && window.particlesJS) {
+    return Promise.resolve();
+  }
+  if (_scriptPromise) return _scriptPromise;
+  _scriptPromise = new Promise((resolve, reject) => {
+    try {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Failed to load particles.js'));
+      document.head.appendChild(s);
+    } catch (e) {
+      console.debug('[particles] creating script tag failed', e);
+      reject(e);
+    }
+  }).catch((e) => {
+    console.debug('[particles] script load failed', e);
+    throw e;
+  });
+  return _scriptPromise;
+}
+export function ensurePJSDom () {
+  try {
+    if (typeof window !== 'undefined' && !window.pJSDom) {
+      window.pJSDom = [];
+    }
+  } catch (e) { console.debug('[particles] ensurePJSDom error', e); }
+}
+export function destroyForId (id) {
+  try {
+    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      try {
+        const inst = list[i];
+        const el = inst?.pJS?.canvas?.el;
+        const hostId = (el && el.parentElement && el.parentElement.id) || inst?.tag?.id || null;
+        if (hostId === id) {
+          const vendors = inst?.pJS?.fn?.vendors;
+          if (vendors?.destroypJS) vendors.destroypJS();
+          if (vendors?.destroy) vendors.destroy();
+          list.splice(i, 1);
+        }
+      } catch (e) { console.debug('[particles] single destroy failed', e); }
+    }
+  } catch (e) { console.debug('[particles] destroyForId failed', e); }
+}
+export function safeRender (id, config) {
+  try {
+    const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+    if (!el) return false;
+    if (typeof window === 'undefined' || !window.particlesJS) return false;
+    destroyForId(id);
+    window.particlesJS(id, config);
+    return true;
+  } catch (e) { console.debug('[particles] render failed', e); return false; }
+}
+export function observeTheme (id, renderFn) {
+  const target = typeof document !== 'undefined' ? document.documentElement : null;
+  if (!target) return () => {};
+  const observer = new MutationObserver(() => {
+    try {
+      destroyForId(id);
+      renderFn?.();
+    } catch (e) { console.debug('[particles] theme change error', e); }
+  });
+  try { observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) { console.debug('[particles] observer start failed', e); }
+  return () => { try { observer.disconnect(); } catch (e) { console.debug('[particles] observer cleanup failed', e); } };
+}
+export function themeIsDark () {
+  try {
+    const t = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null;
+    return t !== 'light';
+  } catch (e) { console.debug('[particles] themeIsDark error', e); return true; }
+}
+export function defaultConfig (isDark = true) {
+  const baseColor = isDark ? '#00c2c2' : '#0ea5a5';
+  const linkColor = isDark ? '#5eead4' : '#14b8a6';
+  const bgColor = isDark ? '#0e111a' : '#f6f8fb';
+  return {
+    particles: {
+      number: { value: 60, density: { enable: true, value_area: 800 } },
+      color: { value: baseColor },
+      shape: { type: 'circle' },
+      opacity: { value: 0.4, random: false },
+      size: { value: 3, random: true },
+      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
+      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
+    },
+    retina_detect: true,
+    background: { color: bgColor }
+  };
+}
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddOperatorForm.vue =====
 
 
@@ -1483,7 +1718,7 @@ body {
 
 <script setup>
 import { ref } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 
 const email = ref('')
 const firstName = ref('')
@@ -1736,11 +1971,11 @@ const submitForm = async () => {
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 /* ---------- Champs ---------- */
 const firstName = ref('')
@@ -2003,6 +2238,395 @@ small.hint { color: var(--text-secondary); }
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddUserForm.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+<template>
+  <div class="login-page">
+    <!-- Canvas animé -->
+    <div id="login-particles"></div>
+
+    <!-- Formulaire de login -->
+    <div class="login-wrapper">
+      <div class="login-container">
+        <div class="login-card">
+          <h2 class="login-title">NetSecure-IQ</h2>
+          <h3 class="login-subtitle">Login to your account</h3>
+
+          <form @submit.prevent="login" class="login-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <input
+              v-model="password"
+              type="password"
+              placeholder="Password"
+              required
+            />
+            <button :disabled="loading" type="submit">
+              {{ loading ? "Loading..." : "Login" }}
+            </button>
+          </form>
+
+          <p class="login-footer">
+            Don't have an account?
+            <router-link to="/register">Register</router-link>
+          </p>
+
+          <p
+            v-if="message"
+            :class="['login-message', successMessage ? 'success' : 'error']"
+          >
+            {{ message }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const password = ref('')
+const message = ref('')
+const successMessage = ref(false)
+const loading = ref(false)
+const router = useRouter()
+const { login: setAuthLogin } = useAuth()
+
+/* Particles (sécurisé) */
+const ID = 'login-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+/* Auth */
+const login = async () => {
+  loading.value = true
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email.value,
+        password: password.value
+      })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Login failed')
+
+    message.value = 'Login successful! Redirecting...'
+    successMessage.value = true
+
+    // Stockage token & infos
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user_id', data.user_id)
+    localStorage.setItem('role', data.role?.toLowerCase() || '')
+    localStorage.setItem('organization_id', data.organization_id || '')
+
+    // informer l'app qu'on vient de se loguer (maj de la nav)
+    window.dispatchEvent(new Event('auth-changed'))
+
+    // Choix de la redirection
+    let redirectTo = '/dashboard'
+    const role = data.role?.toLowerCase()
+    if (role === 'user') redirectTo = '/routertable'
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
+
+    if (typeof setAuthLogin === 'function') setAuthLogin()
+    setTimeout(() => router.push(redirectTo), 200)
+  } catch (err) {
+    message.value = 'Error: ' + (err?.message || 'Unknown error')
+    successMessage.value = false
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Page entière */
+.login-page { position: relative; min-height: 100vh; overflow: hidden; }
+
+/* Canvas particles */
+#login-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #login-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+
+/* Conteneur */
+.login-container { width: 100%; max-width: 420px; }
+
+/* Carte de login */
+.login-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box;
+}
+
+/* Titres */
+.login-title { text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px; }
+.login-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+/* Form */
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+/* Inputs & bouton full-width */
+.login-form input, .login-form button { width: 100%; box-sizing: border-box; }
+
+/* Input style */
+.login-form input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey);
+  border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s;
+}
+.login-form input::placeholder { color: var(--text-secondary); }
+.login-form input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+/* Bouton */
+.login-form button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: background-color 0.2s;
+}
+.login-form button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+.login-form button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+/* Footer */
+.login-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.login-footer a { color: var(--primary-accent); margin-left: 4px; text-decoration: none; }
+.login-footer a:hover { color: var(--primary-hover); }
+
+/* Messages */
+.login-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.login-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.login-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
+<template>
+  <div>
+    <!-- Fond animÃ© derriÃ¨re tout -->
+    <div id="register-particles"></div>
+
+    <!-- Contenu du register -->
+    <div class="register-wrapper">
+      <div class="register-container">
+        <div class="register-card">
+          <h2 class="register-title">NetSecure-IQ</h2>
+          <h3 class="register-subtitle">Create your account</h3>
+
+          <form @submit.prevent="register" class="register-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <button type="submit" :disabled="loading">
+              {{ loading ? "Registering..." : "Register" }}
+            </button>
+          </form>
+
+          <p v-if="message" class="register-message success">{{ message }}</p>
+          <p v-if="error" class="register-message error">{{ error }}</p>
+
+          <p class="register-footer">
+            Already have an account?
+            <router-link to="/login">Login</router-link>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const message = ref('')
+const error = ref('')
+const loading = ref(false)
+const router = useRouter()
+
+/* Particles */
+const ID = 'register-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+const register = async () => {
+  message.value = ''
+  error.value = ''
+  loading.value = true
+
+  try {
+    // âš ï¸ Assure-toi que le backend expose bien POST /api/register.
+    const res = await fetch(`${API}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Registration failed')
+
+    message.value = data.message || 'Registration successful. Check your email.'
+    email.value = ''
+    setTimeout(() => router.push('/login'), 1500)
+  } catch (err) {
+    error.value = err?.message || 'Registration failed'
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Fond animÃ© */
+#register-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #register-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.register-wrapper {
+  position: relative; z-index: 10; display: flex; align-items: center; justify-content: center;
+  padding: 32px; min-height: 100vh;
+}
+
+.register-wrapper, .register-wrapper * {
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+.register-container { width: 100%; max-width: 420px; }
+
+.register-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box; width: 100%;
+}
+
+.register-title {
+  text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px;
+}
+
+.register-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+.register-form { display: flex; flex-direction: column; gap: 16px; }
+
+.register-form input, .register-form button { width: 100%; box-sizing: border-box; }
+
+input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey); border-radius: 6px;
+  padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s ease;
+}
+input::placeholder { color: var(--text-secondary); }
+input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: all 0.2s ease;
+}
+button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+.register-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.register-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.register-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+.register-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.register-footer a { color: var(--primary-accent); text-decoration: none; margin-left: 4px; }
+.register-footer a:hover { color: var(--primary-hover); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
 
 <template>
@@ -2014,7 +2638,7 @@ import { onMounted, onUnmounted } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'bg-particles'
 let stopObs = () => {}
@@ -2128,6 +2752,132 @@ canvas {
 
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\charts\LineChart.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\BackgroundParticles.vue =====
+
+<template>
+  <div id="bg-particles" class="particles-layer"></div>
+</template>
+
+<script setup>
+import { onMounted, onUnmounted } from 'vue'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const ID = 'bg-particles'
+let stopObs = () => {}
+
+function render() {
+  const ok = safeRender(ID, defaultConfig(themeIsDark()))
+  return ok
+}
+
+onMounted(async () => {
+  try { await loadParticlesScript() } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+
+onUnmounted(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+</script>
+
+<style scoped>
+.particles-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  background: transparent;
+  opacity: .9;
+}
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\BackgroundParticles.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\LineChart.vue =====
+
+<template>
+  <div class="chart-root">
+    <canvas ref="canvas"></canvas>
+  </div>
+</template>
+
+<script setup>
+import Chart from 'chart.js/auto' // auto-registers elements/scales/plugins
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+
+const props = defineProps({
+  chartData: { type: Object, required: true },
+  options: { type: Object, default: () => ({}) }
+})
+
+const canvas = ref(null)
+let chartInstance = null
+
+function renderChart () {
+  if (!canvas.value) return
+  // DÃ©truit lâ€™instance prÃ©cÃ©dente si elle existe
+  if (chartInstance) {
+    chartInstance.destroy()
+    chartInstance = null
+  }
+  const ctx = canvas.value.getContext('2d')
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: props.chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
+      scales: { x: { display: false }, y: { display: false } },
+      // Permet de surcharger via :options="..."
+      ...props.options
+    }
+  })
+}
+
+onMounted(renderChart)
+
+// Re-render si les props changent
+watch(() => props.chartData, renderChart, { deep: true })
+watch(() => props.options, renderChart, { deep: true })
+
+onBeforeUnmount(() => {
+  if (chartInstance) chartInstance.destroy()
+})
+</script>
+
+<style scoped>
+.chart-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  /* laisse les clics passer au parent si besoin */
+  pointer-events: none;
+}
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\LineChart.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardOperator.vue =====
 
@@ -2325,133 +3075,33 @@ const orgName  = computed(() => orgProfile.value?.name)
 const orgCity  = computed(() => orgProfile.value?.city)
 const orgEmail = computed(() => orgProfile.value?.contact_email)
 
-const API_BASE_URL = 'http://localhost:8000/api'
-
-// Router data
-const routers = ref({ online: 0, offline: 0, unknown: 0 })
-const miniRouters = ref([])
-
-// Fetch routers data
-async function fetchRouters() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
-    if (!response.ok) throw new Error('Failed to fetch routers')
-    
-    const data = await response.json()
-    if (!Array.isArray(data)) return
-    
-    // Calculate stats
-    const now = new Date()
-    const routerList = data.map(router => {
-      const lastSeen = new Date(router.last_seen || router.time || 0)
-      const minutesAgo = (now - lastSeen) / (1000 * 60)
-      const status = minutesAgo < 5 ? 'online' : 'offline'
-      return { ...router, status }
-    })
-    
-    // Update counters
-    routers.value = {
-      online: routerList.filter(r => r.status === 'online').length,
-      offline: routerList.filter(r => r.status === 'offline').length,
-      unknown: 0 // Not used in current API
-    }
-    
-    // Update mini list (show online first, then offline, limit to 3)
-    miniRouters.value = [...routerList]
-      .sort((a, b) => a.status === 'online' ? -1 : 1)
-      .slice(0, 3)
-  } catch (error) {
-    console.error('Error fetching routers:', error)
-  }
-}
-const agents = ref({ associated: 0, unassociated: 0, deactivated: 0 })
-
-// Fetch agents data
-async function fetchAgents() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
-    if (!response.ok) throw new Error('Failed to fetch agents')
-    
-    const data = await response.json()
-    if (!Array.isArray(data)) return
-    
-    // Log raw data for debugging
-    console.log('Agents data from API:', data)
-    
-    // Count agents by status (matching backend uiStatus function logic)
-    const agentStatuses = data.map(agent => {
-      // Check for Deactivated/Disabled status (case insensitive)
-      if (agent.status && 
-          (agent.status.toLowerCase() === 'deactivated' || 
-           agent.status.toLowerCase() === 'disabled')) {
-        return 'deactivated'
-      } 
-      // Check if associated (has a non-empty site_id)
-      else if (agent.site_id && agent.site_id !== '') {
-        return 'associated'
-      }
-      // Default to unassociated
-      return 'unassociated'
-    })
-    
-    // Count agents by status
-    agents.value = {
-      associated: agentStatuses.filter(s => s === 'associated').length,
-      unassociated: agentStatuses.filter(s => s === 'unassociated').length,
-      deactivated: agentStatuses.filter(s => s === 'deactivated').length
-    }
-    
-    console.log('Agents count:', agents.value)
-  } catch (error) {
-    console.error('Error fetching agents:', error)
-  }
-}
-
-const recentUsers = ref(0)
+/* --------- Demo data (local) --------- */
+const routers = ref({ online: 7, offline: 2, unknown: 1 })
+const miniRouters = ref([
+  { mac: 'E4:8D:8C:AA:01:11', status: 'online'  },
+  { mac: '58:EF:68:02:7C:22', status: 'offline' },
+  { mac: 'C0:56:27:9A:33:44', status: 'unknown' }
+])
+const agents = ref({ associated: 12, unassociated: 4, deactivated: 1 })
+const recentUsers = ref(3)
 
 /* --------- Micro-charts (sparklines) --------- */
+const labels = Array.from({ length: 16 }, (_, i) => i + 1)
+function series(seed, jitter = 3) {
+  let v = seed
+  return labels.map(() => (v = Math.max(0, v + (Math.random() * jitter - jitter / 2))))
+}
 const sparkOpts = {
   plugins: { legend: { display: false }, tooltip: { enabled: false } },
   elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } },
   scales: { x: { display: false }, y: { display: false } }
 }
-
-const generateSparkData = (min, max, base, frequency, amplitude) => {
-  return Array(12).fill(0).map((_, i) => 
-    Math.max(min, Math.min(max, Math.round(base + Math.sin(i * frequency) * amplitude)))
-  )
-}
-
 const sparks = ref({
-  router: { 
-    labels: Array(12).fill(''), 
-    datasets: [{ 
-      data: generateSparkData(5, 10, 7, 1, 3),
-      borderColor: 'rgba(0, 194, 194, 0.8)'
-    }] 
-  },
-  users: { 
-    labels: Array(12).fill(''), 
-    datasets: [{ 
-      data: generateSparkData(0, 5, 2, 0.7, 1.5),
-      borderColor: 'rgba(99, 102, 241, 0.8)'
-    }] 
-  },
-  agents: { 
-    labels: Array(12).fill(''), 
-    datasets: [{ 
-      data: generateSparkData(8, 15, 12, 0.5, 3),
-      borderColor: 'rgba(16, 185, 129, 0.8)'
-    }] 
-  },
-  wg: { 
-    labels: Array(12).fill(''), 
-    datasets: [{ 
-      data: generateSparkData(2, 8, 5, 0.3, 2),
-      borderColor: 'rgba(245, 158, 11, 0.8)'
-    }] 
-  }
-})  
+  router: { labels, datasets: [{ data: series(6),      borderColor: '#22c55e' }] },
+  users:  { labels, datasets: [{ data: series(2, 2),   borderColor: '#60a5fa' }] },
+  agents: { labels, datasets: [{ data: series(5, 3),   borderColor: '#f59e0b' }] },
+  wg:     { labels, datasets: [{ data: series(4, 2.5), borderColor: '#00c2c2' }] }
+})
 
 /* --------- Mini helpers --------- */
 const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
@@ -2470,19 +3120,15 @@ function stateClass(s) {
 
 /* --------- Light animation of figures --------- */
 let iv
-onMounted(async () => {
-  // Initial data load
-  await Promise.all([fetchRouters(), fetchAgents()])
-  
-  // Refresh data every 30 seconds
-  iv = setInterval(async () => {
-    await Promise.all([fetchRouters(), fetchAgents()])
-    // Update sparkline data with new values
-    sparks.value.router.datasets[0].data = generateSparkData(5, 10, 7, 1, 3)
-    sparks.value.agents.datasets[0].data = generateSparkData(8, 15, 12, 0.5, 3)
-    sparks.value.users.datasets[0].data = generateSparkData(0, 5, 2, 0.7, 1.5)
-    sparks.value.wg.datasets[0].data = generateSparkData(2, 8, 5, 0.3, 2)
-  }, 30000) // 30 seconds
+onMounted(() => {
+  iv = setInterval(() => {
+    routers.value.online  = Math.max(0, routers.value.online  + (Math.random() > .5 ? 1 : -1))
+    routers.value.offline = Math.max(0, routers.value.offline + (Math.random() > .7 ? 1 : -1))
+    sparks.value.router.datasets[0].data = series(6)
+    sparks.value.agents.datasets[0].data = series(5)
+    sparks.value.users.datasets[0].data  = series(2, 2)
+    sparks.value.wg.datasets[0].data     = series(4, 2.5)
+  }, 4000)
 })
 onUnmounted(() => { if (iv) clearInterval(iv) })
 </script>
@@ -2930,7 +3576,7 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'home-particles'
 let stopObs = () => {}
@@ -3121,12 +3767,12 @@ onBeforeUnmount(() => {
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../composables/useAuth'
-import { API } from '@/utils/api.js'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')
@@ -3280,6 +3926,536 @@ const login = async () => {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\LoginForm.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
+
+<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + nav links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <!-- Not authenticated -->
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (ADMIN) -->
+      <template v-else>
+        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+        <router-link to="/organization" class="nav-link" :class="{ active: $route.path === '/organization' }">Organization</router-link>
+        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
+        <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
+        <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
+        <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
+        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
+          Agent Pre-Registration
+        </router-link>
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: role badge + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as administrator">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Admin signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Light / Dark theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Left */
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand {
+  font-weight: bold; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+}
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationOperator.vue =====
+
+<!-- src/frontend/src/components/TopNavigationOperator.vue -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <!-- Not authenticated -->
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (OPERATOR) -->
+      <template v-else>
+        <router-link
+          to="/dashboard-operator"
+          class="nav-link"
+          :class="{ active: $route.path === '/dashboard-operator' }"
+        >Dashboard</router-link>
+
+        <router-link
+          to="/routertable"
+          class="nav-link"
+          :class="{ active: $route.path === '/routertable' }"
+        >RouterTable</router-link>
+
+        <router-link
+          to="/organization"
+          class="nav-link"
+          :class="{ active: $route.path === '/organization' }"
+        >Organization</router-link>
+
+        <!-- Add User only if attached to an organization -->
+        <router-link
+          v-if="hasOrganization"
+          to="/adduser"
+          class="nav-link"
+          :class="{ active: $route.path === '/adduser' }"
+        >Add User</router-link>
+
+        <!-- Agents & Pre-registration visible only if org -->
+        <router-link
+          v-if="hasOrganization"
+          to="/agents"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents' }"
+        >Agents</router-link>
+
+        <router-link
+          v-if="hasOrganization"
+          to="/agents/register"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents/register' }"
+        >Agent Pre-Registration</router-link>
+
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: status + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as operator">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Operator signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar { background-color: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+
+/* Left */
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand { font-weight: bold; font-size: 18px; color: var(--primary-accent); text-decoration: none; }
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationOperator.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationUser.vue =====
+
+<!-- src/frontend/src/components/TopNavigationUser.vue -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (USER) -->
+      <template v-else>
+        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: status + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as user">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">User signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">â˜€ï¸</span>
+        <span v-else>ðŸŒ™</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand {
+  font-weight: 700; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+}
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationUser.vue =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
 
 
@@ -3373,7 +4549,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const CONTAINER_ID = 'org-particles'
 let stopObs = () => {}
@@ -3590,11 +4766,11 @@ span{ font-size:14px; color:var(--text-primary); }
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const router = useRouter()
 const message = ref('')
@@ -3891,11 +5067,11 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const message = ref('')
@@ -4283,15 +5459,15 @@ onMounted(loadRouters)
         @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -4486,15 +5662,15 @@ onUnmounted(() => {
         @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -4651,7 +5827,7 @@ onUnmounted(() => {
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -4769,70 +5945,12 @@ onUnmounted(() => {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
-import { ref } from 'vue';
-
-const isAuthenticated = ref(false);
-
-function login() {
-  isAuthenticated.value = true;
-}
-
-function logout() {
-  isAuthenticated.value = false;
-  localStorage.removeItem('token');
-  localStorage.removeItem('role');
-  localStorage.removeItem('organization_id');
-  localStorage.removeItem('user_id');
-  window.dispatchEvent(new Event('auth-changed'));
-  // redirection propre
-  window.location.replace('/#/login');
-}
-
-export function useAuth() {
-  return { isAuthenticated, login, logout };
-}
+// src/frontend/src/core/index.js// Regroupe: utils/api.js, utils/authApi.js, utils/agentsApi.js,// composables/useAuth.js, stores/authStore.js, stores/siteStore.js,// helpers/acl.js, utils/particles.js// -------------------------------// API base & HTTP helper// -------------------------------export const API =  (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') ||  'http://localhost:8000';const defaultHeaders = { 'Content-Type': 'application/json' };export const authHeaders = () => {  const t = localStorage.getItem('token');  return t ? { Authorization: `Bearer ${t}` } : {};};async function http(method, path, body, extraHeaders = {}) {  const res = await fetch(`${API}${path}`, {    method,    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },    body: body != null ? JSON.stringify(body) : undefined,  });  let data = null;  try { data = await res.json(); } catch { /* no json body */ }  if (!res.ok) {    const msg = data?.error || data?.message || `HTTP ${res.status}`;    throw new Error(msg);  }  return data;}export const api = {  get: (p, h) => http('GET', p, undefined, h),  post: (p, b, h) => http('POST', p, b, h),  del: (p, b, h) => http('DELETE', p, b, h),};// -------------------------------// Domain APIs (auth / users / agents)// -------------------------------export const authApi = {  login: (email, password) => api.post('/api/login', { email, password }),  register: (email) => api.post('/api/register', { email }),  createUser: (payload) => api.post('/api/users', payload),  completeOrganization: (payload) =>    api.post('/api/complete-organization', payload),};export const agentsApi = {  list: () => api.get('/api/mikrotik/list'),  preregister: (mac) => api.post('/api/mikrotik/preregister', { mac }),  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),  remove: (mac) => api.del('/api/mikrotik', { mac }),  test: (mac) => api.post('/api/mikrotik/test', { mac }),  associate: (mac, site_id) => api.post('/api/mikrotik/associate', { mac, site_id }),};// -------------------------------// Minimal ACL helper// -------------------------------export const acl = {  can(role, allowed) {    const r = (role || '').toLowerCase();    const list = Array.isArray(allowed) ? allowed : [allowed];    return list.map(String).map(s => s.toLowerCase()).includes(r);  }};// -------------------------------// Global auth/site state + composable// (remplace stores/* + composables/useAuth.js)// -------------------------------import { reactive, computed } from 'vue';const _auth = reactive({  token: localStorage.getItem('token') || '',  role: (localStorage.getItem('role') || '').toLowerCase(),  user_id: localStorage.getItem('user_id') || '',  organization_id: localStorage.getItem('organization_id') || '',});const _site = reactive({  organization_id: localStorage.getItem('organization_id') || '',});function syncAuthToLocal(data = {}) {  if ('token' in data) localStorage.setItem('token', data.token || '');  if ('user_id' in data) localStorage.setItem('user_id', data.user_id || '');  if ('role' in data) localStorage.setItem('role', (data.role || '').toLowerCase());  if ('organization_id' in data) localStorage.setItem('organization_id', data.organization_id || '');}export function useAuth() {  const isLoggedIn = computed(() => !!_auth.token);  async function login(email, password) {    const data = await authApi.login(email, password);    Object.assign(_auth, {      token: data.token || '',      role: (data.role || '').toLowerCase(),      user_id: data.user_id || '',      organization_id: data.organization_id || '',    });    syncAuthToLocal(_auth);    _site.organization_id = _auth.organization_id;    window.dispatchEvent(new Event('auth-changed'));    return data;  }  function logout() {    Object.assign(_auth, { token: '', role: '', user_id: '', organization_id: '' });    syncAuthToLocal(_auth);    _site.organization_id = '';    window.dispatchEvent(new Event('auth-changed'));  }  return { state: _auth, isLoggedIn, login, logout };}export const authStore = {  state: _auth,  setOrganization(id) {    _auth.organization_id = id || '';    _site.organization_id = _auth.organization_id;    localStorage.setItem('organization_id', _auth.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};export const siteStore = {  state: _site,  setOrganization(id) {    _site.organization_id = id || '';    localStorage.setItem('organization_id', _site.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};// -------------------------------// Particles utilities (remplace utils/particles.js)// -------------------------------export function ensurePJSDom() {  if (!window.pJSDom) window.pJSDom = [];  return window.pJSDom;}export function themeIsDark() {  // dÃ©faut: dark si pas explicitement 'light'  return document.documentElement.getAttribute('data-theme') !== 'light';}export function defaultConfig(isDark = true) {  const color = isDark ? '#00c2c2' : '#0ea5a5';  const linkColor = isDark ? '#22d3ee' : '#0ea5a5';  return {    particles: {      number: { value: 40, density: { enable: true, value_area: 800 } },      color: { value: color },      shape: { type: 'circle' },      opacity: { value: 0.2 },      size: { value: 3, random: true },      line_linked: { enable: true, distance: 150, color: linkColor, opacity: 0.2, width: 1 },      move: { enable: true, speed: 2, out_mode: 'out' }    },    interactivity: {      detect_on: 'canvas',      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }    },    retina_detect: true  };}export function loadParticlesScript() {  return new Promise((resolve, reject) => {    if (window.particlesJS) return resolve();    const id = 'particlesjs-cdn';    if (document.getElementById(id)) {      document.getElementById(id).addEventListener('load', resolve, { once: true });      return;    }    const s = document.createElement('script');    s.id = id;    s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';    s.async = true;    s.onload = () => resolve();    s.onerror = (e) => reject(e);    document.head.appendChild(s);  });}export function destroyForId(containerId) {  try {    const list = ensurePJSDom();    for (let i = list.length - 1; i >= 0; i--) {      const inst = list[i];      const el = inst?.pJS?.canvas?.el?.parentNode || inst?.pJS?.canvas?.el;      if (!el) continue;      const same = (el.id === containerId);      if (same) {        // compat des versions        if (inst?.pJS?.fn?.vendors?.destroy) inst.pJS.fn.vendors.destroy();        if (inst?.pJS?.fn?.vendors?.destroypJS) inst.pJS.fn.vendors.destroypJS();        list.splice(i, 1);      }    }  } catch { /* ignore */ }}export function safeRender(containerId, config) {  if (!window.particlesJS || !document.getElementById(containerId)) return false;  destroyForId(containerId);  try {    window.particlesJS(containerId, config);    return true;  } catch {    return false;  }}export function observeTheme(containerId, renderFn) {  const mo = new MutationObserver(() => { renderFn(); });  mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });  const onStorage = () => renderFn();  window.addEventListener('storage', onStorage);  return () => { mo.disconnect(); window.removeEventListener('storage', onStorage); };}
 
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-import { ref, computed } from 'vue';
-
-const user = ref<{ email: string } | null>(null);
-
-export function useAuth() {
-  function login(email: string) {
-    user.value = { email };
-  }
-  function logout() {
-    user.value = null;
-  }
-  const isAuthenticated = computed(() => !!user.value);
-  return { user, isAuthenticated, login, logout };
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
-
-// src/helpers/acl.js
-
-export function can(user, needed) {
-    if (!user) return false;
-    const perms = new Set((user.permissions || []).map(String));
-    const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
-    return list.every(p => perms.has(String(p)));
-  }
-  
-  // Aussi un export default pour compatibilitÃ©
-  export default can;
-  
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\main.js =====
 
@@ -4860,7 +5978,7 @@ import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
 import DashboardOperator from '@/components/DashboardOperator.vue'
 
-import { useAuth } from '../composables/useAuth'
+import { useAuth } from '../appCore.js'
 
 const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
 const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
@@ -4924,448 +6042,6 @@ export default router
 
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\router\index.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('token') || '')
-  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
-
-  const isAuthenticated = computed(() => !!token.value)
-  const role = computed(() => user.value?.role || null)
-
-  function setAuth(newToken, newUser) {
-    token.value = newToken
-    user.value = newUser
-    localStorage.setItem('token', newToken)
-    localStorage.setItem('user', JSON.stringify(newUser))
-  }
-
-  function logout() {
-    token.value = ''
-    user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  }
-
-  return { token, user, isAuthenticated, role, setAuth, logout }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', {
-  state: () => ({
-  isAuthenticated: false,
-  user: null, // { email, role_id, organization_id }
-  token: ''
-    isAuthenticated: false,
-    user: null, // { email, role_id, organization_id }
-    token: ''
-  }),
-  getters: {
-  isAdmin: (state) => state.user?.role_id === 1,
-  isOperator: (state) => state.user?.role_id === 2,
-  isUser: (state) => state.user?.role_id === 3,
-    isAdmin: (state) => state.user?.role_id === 1,
-    isOperator: (state) => state.user?.role_id === 2,
-    isUser: (state) => state.user?.role_id === 3,
-  },
-  actions: {
-  logout() {
-    this.isAuthenticated = false
-    this.user = null
-    this.token = ''
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  },
-    logout() {
-      this.isAuthenticated = false
-      this.user = null
-      this.token = ''
-      localStorage.removeItem('token')
-      // Optionally: use router.push('/login') if router is available here
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-import { defineStore } from 'pinia'
-import { useAuthStore } from './authStore'
-
-export const useSiteStore = defineStore('site', {
-  state: () => ({
-    sites: [],
-  }),
-  actions: {
-    async fetchSites() {
-      const auth = useAuthStore()
-      let url = '/api/sites'
-      // Optionally add org/user filter params based on role
-      this.sites = await fetch(url, {
-        headers: { Authorization: `Bearer ${auth.token}` }
-      }).then(r => r.json())
-    }
-  },
-  getters: {
-    filteredSites(state) {
-      const auth = useAuthStore()
-      if (auth.role === 'Administrator') return state.sites
-      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id)
-      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id))
-      return []
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-// src/frontend/src/utils/agentsApi.js
-// Client minimal pour les endpoints MikroTik (agents) du backend.
-
-import { API } from '@/utils/api.js'
-
-function authHeaders() {
-  const t = localStorage.getItem('token') || ''
-  return {
-    'Content-Type': 'application/json',
-    ...(t ? { Authorization: 'Bearer ' + t } : {})
-  }
-}
-
-export async function listAgents() {
-  const res = await fetch(`${API}/mikrotik/list`, { headers: authHeaders() })
-  if (!res.ok) throw new Error('List failed')
-  return res.json() // [{ mac, ip, status, site_id }]
-}
-
-export async function preregister(mac, siteId = null) {
-  const body = siteId ? { mac, site_id: siteId } : { mac }
-  const res = await fetch(`${API}/mikrotik/preregister`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(body)
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Pre-register failed')
-  return data // { internal_ip, private_key, public_key, mikrotik_config, server_peer }
-}
-
-export async function testAgent(mac) {
-  const res = await fetch(`${API}/mikrotik/test`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Test failed')
-  return data // { success: true, message: 'Ping successful' }
-}
-
-export async function disableAgent(mac) {
-  const res = await fetch(`${API}/mikrotik/disable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Disable failed')
-  return data
-}
-
-export async function enableAgent(mac) {
-  const res = await fetch(`${API}/mikrotik/enable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Enable failed')
-  return data
-}
-
-export async function associateAgent(mac, siteId) {
-  const res = await fetch(`${API}/mikrotik/associate`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac, site_id: siteId })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Association failed')
-  return data
-}
-
-export async function deleteAgent(mac) {
-  const res = await fetch(`${API}/mikrotik/delete`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Deletion failed')
-  return data
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-// src/frontend/src/utils/api.js
-
-export const API = 'http://localhost:8000';
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\authApi.js =====
-
-// src/frontend/src/utils/authApi.js
-import { API } from './api'
-
-export const authApi = {
-  async login(email, password) {
-    console.log('Making login request to:', `${API}/login`);
-    const response = await fetch(`${API}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, password })
-    })
-    
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || 'Login failed')
-    }
-    
-    return response.json()
-  },
-  
-  async logout() {
-    // Add logout logic if needed
-  },
-  
-  async getCurrentUser() {
-    const token = localStorage.getItem('token')
-    if (!token) return null
-    
-    const response = await fetch(`${API}/me`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch user')
-    }
-    
-    return response.json()
-  }
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\authApi.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
-
-// src/frontend/src/utils/particles.js
-// Utilities to safely use particles.js (Vincent Garreau) with Vue & theme switching
-
-let _scriptPromise = null
-
-/**
- * Load particles.js from CDN once.
- * Resolves immediately if already present.
- */
-export function loadParticlesScript () {
-  if (typeof window !== 'undefined' && window.particlesJS) {
-    return Promise.resolve()
-  }
-  if (_scriptPromise) return _scriptPromise
-
-  _scriptPromise = new Promise((resolve, reject) => {
-    try {
-      const s = document.createElement('script')
-      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js'
-      s.async = true
-      s.onload = () => resolve()
-      s.onerror = () => reject(new Error('Failed to load particles.js'))
-      document.head.appendChild(s)
-    } catch (e) {
-      // not empty: log + reject
-      console.debug('[particles] creating script tag failed', e)
-      reject(e)
-    }
-  }).catch((e) => {
-    // not empty: log then rethrow for callers who care
-    console.debug('[particles] script load failed', e)
-    throw e
-  })
-
-  return _scriptPromise
-}
-
-/**
- * Ensure the global pJSDom array exists (created by the lib).
- */
-export function ensurePJSDom () {
-  try {
-    if (typeof window !== 'undefined' && !window.pJSDom) {
-      window.pJSDom = []
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] ensurePJSDom error', e)
-  }
-}
-
-/**
- * Destroy particles instance bound to a given container id.
- */
-export function destroyForId (id) {
-  try {
-    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : []
-    for (let i = list.length - 1; i >= 0; i--) {
-      try {
-        const inst = list[i]
-        const el = inst?.pJS?.canvas?.el
-        const hostId =
-          (el && el.parentElement && el.parentElement.id) ||
-          inst?.tag?.id ||
-          null
-        if (hostId === id) {
-          const vendors = inst?.pJS?.fn?.vendors
-          if (vendors?.destroypJS) vendors.destroypJS()
-          if (vendors?.destroy) vendors.destroy()
-          list.splice(i, 1)
-        }
-      } catch (e) {
-        // not empty
-        console.debug('[particles] single destroy failed', e)
-      }
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] destroyForId failed', e)
-  }
-}
-
-/**
- * Render particles into an element by id, defensively.
- * Returns true on success, false if skipped (no elem or no lib).
- */
-export function safeRender (id, config) {
-  try {
-    const el = typeof document !== 'undefined' ? document.getElementById(id) : null
-    if (!el) return false
-    if (typeof window === 'undefined' || !window.particlesJS) return false
-
-    destroyForId(id)
-    window.particlesJS(id, config)
-    return true
-  } catch (e) {
-    // not empty
-    console.debug('[particles] render failed', e)
-    return false
-  }
-}
-
-/**
- * Observe theme changes (data-theme attr on <html>) and re-render particles.
- * Returns a function to stop observing.
- */
-export function observeTheme (id, renderFn) {
-  const target = typeof document !== 'undefined' ? document.documentElement : null
-  if (!target) return () => {}
-
-  const observer = new MutationObserver(() => {
-    try {
-      destroyForId(id)
-      renderFn?.()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] theme change error', e)
-    }
-  })
-
-  try {
-    observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] })
-  } catch (e) {
-    // not empty
-    console.debug('[particles] observer start failed', e)
-  }
-
-  return () => {
-    try {
-      observer.disconnect()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] observer cleanup failed', e)
-    }
-  }
-}
-
-/**
- * Detect if current theme is dark based on data-theme attribute.
- */
-export function themeIsDark () {
-  try {
-    const t = typeof document !== 'undefined'
-      ? document.documentElement.getAttribute('data-theme')
-      : null
-    return t !== 'light'
-  } catch (e) {
-    // not empty
-    console.debug('[particles] themeIsDark error', e)
-    return true
-  }
-}
-
-/**
- * Minimal default config that adapts to theme.
- */
-export function defaultConfig (isDark = true) {
-  const baseColor = isDark ? '#00c2c2' : '#0ea5a5'
-  const linkColor = isDark ? '#5eead4' : '#14b8a6'
-  const bgColor = isDark ? '#0e111a' : '#f6f8fb'
-
-  return {
-    particles: {
-      number: { value: 60, density: { enable: true, value_area: 800 } },
-      color: { value: baseColor },
-      shape: { type: 'circle' },
-      opacity: { value: 0.4, random: false },
-      size: { value: 3, random: true },
-      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
-      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
-    },
-    retina_detect: true,
-    background: { color: bgColor }
-  }
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
 
@@ -5877,6 +6553,7 @@ function rowTint(status) {
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -5898,41 +6575,17 @@ function formatMac() {
 }
 const macValid = computed(() => /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac.value))
 
-const API_BASE_URL = 'http://localhost:8000/api'
+import { preregister } from '@/appCore.js'
 
 async function submit() {
   if (!macValid.value) return showToast('Invalid MAC address', false)
   loading.value = true
   result.value = null
   try {
-    const response = await fetch(`${API_BASE_URL}/mikrotik/preregister`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mac: mac.value,
-        site_id: siteId.value.trim() || undefined
-      })
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.message || 'Pre-registration failed')
-    }
-
-    const data = await response.json()
-    result.value = {
-      internal_ip: data.internal_ip || 'N/A',
-      private_key: data.private_key || 'N/A',
-      public_key: data.public_key || 'N/A',
-      mikrotik_config: data.mikrotik_config || 'N/A',
-      server_peer: data.server_peer || 'N/A'
-    }
-    
+    const data = await preregister(mac.value, siteId.value.trim() || undefined)
+    result.value = data
     showToast('âœ… Pre-registration complete')
   } catch (e) {
-    console.error('Pre-registration error:', e)
     showToast(e.message || 'Pre-registration failed', false)
   } finally {
     loading.value = false
@@ -6183,7 +6836,7 @@ function downloadRsc() {
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/utils/agentsApi.js'
+import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
 
 /* ---------- State ---------- */
 const agents = ref([])           // DonnÃ©es des agents du backend
@@ -6589,7 +7242,7 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
 
             <textarea class="code" readonly rows="12" :value="script"></textarea>
             <p class="note">
-              Apply the script via <em>Files → Run Script</em> or through the router CLI.
+              Apply the script via <em>Files ? Run Script</em> or through the router CLI.
             </p>
           </div>
 
@@ -6796,7 +7449,7 @@ function showToast(msg, type = 'success') {
 defineOptions({ name: 'LoginPage' })
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore } from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')

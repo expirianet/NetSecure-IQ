@@ -1,482 +1,26 @@
 ﻿
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
 
-package auth
+# path: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env
 
+# --- PostgreSQL ---
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=yourpassword
+POSTGRES_DB=netsecure
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+# --- JWT ---
+JWT_SECRET=your-secret-key-change-this-in-production
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\agents.go =====
+# --- InfluxDB ---
+INFLUXDB_URL=http://localhost:8086
+INFLUXDB_TOKEN=your-influxdb-token
+INFLUXDB_ORG=your-org
+INFLUXDB_BUCKET=netsecure
 
-package handlers
 
-import (
-	"database/sql"
-	"encoding/json"
-	"errors"
-	"net"
-	"net/http"
-	"strings"
-	"time"
-
-	middleware "netsecure-backend/middleware"
-	wireguard "netsecure-backend/wireguard"
-)
-
-type AgentRow struct {
-	ID              string     `json:"id"`
-	OrganizationID  *string    `json:"organization_id,omitempty"`
-	SiteID          *string    `json:"site_id,omitempty"`
-	MacAddress      string     `json:"mac_address"`
-	VPNInternalIP   *string    `json:"vpn_internal_ip,omitempty"`
-	WireGuardPublic *string    `json:"wireguard_public_key,omitempty"`
-	Provisioning    string     `json:"provisioning_status"`
-	IsActive        bool       `json:"is_active"`
-	LastOnlineAt    *time.Time `json:"last_online_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	SiteName        *string    `json:"site_name,omitempty"`
-}
-
-func HandleListAgents(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		role := middleware.GetRoleName(r)
-		userOrg := middleware.GetOrgID(r)
-
-		query := `
-		SELECT a.id, a.organization_id, a.site_id, a.mac_address, a.vpn_internal_ip,
-		       a.wireguard_public_key, a.provisioning_status, a.is_active, a.last_online_at,
-		       a.created_at, a.updated_at, s.name as site_name
-		  FROM agents a
-		  LEFT JOIN sites s ON s.id = a.site_id
-		`
-		args := []interface{}{}
-		if role == "Admin" {
-			// no where
-		} else if role == "Operator" {
-			query += ` WHERE a.organization_id = $1`
-			args = append(args, userOrg)
-		} else {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-		query += ` ORDER BY a.created_at DESC`
-
-		rows, err := db.Query(query, args...)
-		if err != nil {
-			http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		out := []AgentRow{}
-		for rows.Next() {
-			var a AgentRow
-			err := rows.Scan(&a.ID, &a.OrganizationID, &a.SiteID, &a.MacAddress, &a.VPNInternalIP,
-				&a.WireGuardPublic, &a.Provisioning, &a.IsActive, &a.LastOnlineAt, &a.CreatedAt, &a.UpdatedAt, &a.SiteName)
-			if err == nil {
-				out = append(out, a)
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
-	}
-}
-
-func HandlePreRegisterAgent(db *sql.DB) http.HandlerFunc {
-	type reqBody struct {
-		MacAddress     string  `json:"mac_address"`
-		OrganizationID *string `json:"organization_id,omitempty"`
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Only POST", http.StatusMethodNotAllowed)
-			return
-		}
-		role := middleware.GetRoleName(r)
-		userOrg := middleware.GetOrgID(r)
-		var body reqBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MacAddress == "" {
-			http.Error(w, "Invalid body", http.StatusBadRequest)
-			return
-		}
-		if role == "Operator" {
-			// operator peut prÃ©ciser org_id mais doit matcher le sien
-			if body.OrganizationID != nil && *body.OrganizationID != userOrg {
-				http.Error(w, "Cross-tenant operation forbidden", http.StatusForbidden)
-				return
-			}
-			body.OrganizationID = &userOrg
-		} else if role != "Admin" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-
-		// already exists?
-		var exists bool
-		_ = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM agents WHERE mac_address=$1)`, strings.ToLower(body.MacAddress)).Scan(&exists)
-		if exists {
-			http.Error(w, "Agent already exists", http.StatusConflict)
-			return
-		}
-
-		priv, pub, err := wireguard.GenerateKeyPair()
-		if err != nil {
-			http.Error(w, "WG keygen failed", http.StatusInternalServerError)
-			return
-		}
-		ip := wireguard.ReserveVPNIP() // simple helper "10.10.10.X/32"
-
-		var id string
-		err = db.QueryRow(`
-			INSERT INTO agents (organization_id, mac_address, vpn_internal_ip,
-				wireguard_public_key, wireguard_private_key, provisioning_status, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, 'UNASSOCIATED', now(), now())
-			RETURNING id
-		`, body.OrganizationID, strings.ToLower(body.MacAddress), ip, pub, priv).Scan(&id)
-		if err != nil {
-			http.Error(w, "DB insert: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		script := wireguard.GenerateMikrotikScript(priv, ip)
-		resp := map[string]interface{}{
-			"id":              id,
-			"mac_address":     strings.ToLower(body.MacAddress),
-			"vpn_internal_ip": ip,
-			"script":          script,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}
-}
-
-func HandleAgentActions(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
-		parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
-		if len(parts) < 1 || parts[0] == "" {
-			http.Error(w, "Not found", http.StatusNotFound)
-			return
-		}
-		id := parts[0]
-		action := ""
-		if len(parts) >= 2 {
-			action = parts[1]
-		}
-
-		switch r.Method {
-		case http.MethodPost:
-			switch action {
-			case "associate":
-				handleAssociate(db, id, w, r)
-				return
-			case "deactivate":
-				handleDeactivate(db, id, w, r)
-				return
-			case "test":
-				handleTest(db, id, w, r)
-				return
-			default:
-				http.Error(w, "Not found", http.StatusNotFound)
-				return
-			}
-		case http.MethodDelete:
-			handleDelete(db, id, w, r)
-			return
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-	}
-}
-
-func handleAssociate(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
-	role := middleware.GetRoleName(r)
-	userOrg := middleware.GetOrgID(r)
-	var body struct {
-		SiteID string `json:"site_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SiteID == "" {
-		http.Error(w, "Invalid body", http.StatusBadRequest)
-		return
-	}
-	// scope check
-	if role == "Operator" {
-		var orgID string
-		if err := db.QueryRow(`SELECT organization_id FROM sites WHERE id=$1`, body.SiteID).Scan(&orgID); err != nil {
-			http.Error(w, "Site not found", http.StatusBadRequest)
-			return
-		}
-		if orgID != userOrg {
-			http.Error(w, "Cross-tenant forbidden", http.StatusForbidden)
-			return
-		}
-	} else if role != "Admin" {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	if _, err := db.Exec(`UPDATE agents SET site_id=$1, provisioning_status='ASSOCIATED', updated_at=now() WHERE id=$2`, body.SiteID, id); err != nil {
-		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-}
-
-func handleDeactivate(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
-	role := middleware.GetRoleName(r)
-	if role != "Admin" && role != "Operator" {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	if _, err := db.Exec(`UPDATE agents SET is_active=false, provisioning_status='DEACTIVATED', updated_at=now() WHERE id=$1`, id); err != nil {
-		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-}
-
-func handleDelete(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
-	role := middleware.GetRoleName(r)
-	if role != "Admin" && role != "Operator" {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	if _, err := db.Exec(`DELETE FROM agents WHERE id=$1`, id); err != nil {
-		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func handleTest(db *sql.DB, id string, w http.ResponseWriter, r *http.Request) {
-	// ping simple TCP (ex.: 22) sur l'IP interne si dispo
-	var ip *string
-	if err := db.QueryRow(`SELECT vpn_internal_ip FROM agents WHERE id=$1`, id).Scan(&ip); err != nil || ip == nil {
-		http.Error(w, "Agent not found or no IP", http.StatusBadRequest)
-		return
-	}
-	ok := tcpReachable(strings.Split(*ip, "/")[0], 22, 1500*time.Millisecond) // best effort
-	if ok {
-		_, _ = db.Exec(`UPDATE agents SET provisioning_status='PROVISIONED', updated_at=now() WHERE id=$1`, id)
-	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": ok})
-}
-
-func tcpReachable(host string, port int, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, itoa(port)), timeout)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}
-
-func itoa(i int) string { return errors.New("").Error()[:0] } // dummy to avoid strconv import
-// (ok on va le faire propreâ€¦)
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\agents.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
-
-package handlers
-
-import (
-	"database/sql"
-	"encoding/json"
-	"net/http"
-
-	middleware "netsecure-backend/middleware"
-)
-
-type AuthMeSitePerm struct {
-	SiteID          string `json:"site_id"`
-	ReadAccess      bool   `json:"read_access"`
-	WriteAccess     bool   `json:"write_access"`
-	CanReceiveAlert bool   `json:"can_receive_alerts"`
-}
-type AuthMeUser struct {
-	ID             string  `json:"id"`
-	Email          string  `json:"email"`
-	FirstName      *string `json:"first_name,omitempty"`
-	LastName       *string `json:"last_name,omitempty"`
-	RoleID         int     `json:"role_id"`
-	OrganizationID *string `json:"organization_id,omitempty"`
-	Attributes     *string `json:"attributes,omitempty"`
-	LastLoginAt    *string `json:"last_login_at,omitempty"`
-	RoleName       string  `json:"role_name"`
-}
-type AuthMeResponse struct {
-	User            AuthMeUser       `json:"user"`
-	Permissions     []string         `json:"permissions"`
-	SitePermissions []AuthMeSitePerm `json:"site_permissions"`
-}
-
-func HandleAuthMe(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		uid := middleware.GetUserID(r)
-		if uid == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		var u AuthMeUser
-		if err := db.QueryRow(`
-			SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-			       u.organization_id, u.attributes, u.last_login_at, r.name
-			  FROM users u
-			  JOIN roles r ON r.id = u.role_id
-			 WHERE u.id = $1
-		`, uid).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.RoleID,
-			&u.OrganizationID, &u.Attributes, &u.LastLoginAt, &u.RoleName); err != nil {
-			http.Error(w, "user not found", http.StatusUnauthorized)
-			return
-		}
-
-		perms := []string{}
-		rows, err := db.Query(`
-			SELECT p.name
-			  FROM role_permissions rp
-			  JOIN permissions p ON p.id = rp.permission_id
-			 WHERE rp.role_id = $1 AND (rp.read_access = TRUE OR rp.write_access = TRUE)
-		`, u.RoleID)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var n string
-				if err := rows.Scan(&n); err == nil {
-					perms = append(perms, n)
-				}
-			}
-		}
-
-		sperm := []AuthMeSitePerm{}
-		if u.RoleID == 3 {
-			sr, err := db.Query(`
-				SELECT site_id, read_access, write_access, can_receive_alerts
-				  FROM user_site_permissions
-				 WHERE user_id = $1
-			`, u.ID)
-			if err == nil {
-				defer sr.Close()
-				for sr.Next() {
-					var p AuthMeSitePerm
-					if err := sr.Scan(&p.SiteID, &p.ReadAccess, &p.WriteAccess, &p.CanReceiveAlert); err == nil {
-						sperm = append(sperm, p)
-					}
-				}
-			}
-		}
-
-		resp := AuthMeResponse{User: u, Permissions: perms, SitePermissions: sperm}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\schema.go =====
-
-package handlers
-
-import (
-	"database/sql"
-	"fmt"
-)
-
-func EnsureAgentSchema(db *sql.DB) error {
-	// extensions UUID
-	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`); err != nil {
-		return fmt.Errorf("create extension pgcrypto: %w", err)
-	}
-
-	// agents table
-	_, err := db.Exec(`
-	CREATE TABLE IF NOT EXISTS agents (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		organization_id UUID NULL,
-		site_id UUID NULL,
-		mac_address TEXT UNIQUE NOT NULL,
-		vpn_internal_ip TEXT NULL,
-		wireguard_public_key TEXT NULL,
-		wireguard_private_key TEXT NULL,
-		provisioning_status TEXT NOT NULL DEFAULT 'UNASSOCIATED',
-		is_active BOOLEAN NOT NULL DEFAULT TRUE,
-		last_online_at TIMESTAMPTZ NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	);
-	`)
-	if err != nil {
-		return fmt.Errorf("create agents: %w", err)
-	}
-
-	// helpful index
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_org ON agents (organization_id);`)
-	return nil
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\schema.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\main.go =====
 
@@ -508,17 +52,22 @@ import (
 	"gopkg.in/gomail.v2"
 )
 
-var db *sql.DB
-var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
-
+// ======================================================
+// Globals (valeurs affectÃ©es dans main() aprÃ¨s Load .env)
+// ======================================================
 var (
-	influxToken  = os.Getenv("INFLUXDB_TOKEN")
-	influxBucket = os.Getenv("INFLUXDB_BUCKET")
-	influxOrg    = os.Getenv("INFLUXDB_ORG")
-	influxURL    = os.Getenv("INFLUXDB_URL")
+	db          *sql.DB
+	jwtSecret   []byte
+	influxToken string
+	influxBucket string
+	influxOrg   string
+	influxURL   string
 	influxClient influxdb2.Client
 )
 
+// ======================
+// Request/Model structs
+// ======================
 type RegisterRequest struct {
 	Email string `json:"email"`
 }
@@ -559,7 +108,7 @@ type CreateUserRequest struct {
 	FirstName      string  `json:"first_name"`
 	LastName       string  `json:"last_name"`
 	OrganizationID *string `json:"organization_id"`
-	Role           string  `json:"role"` // <-- Add this field
+	Role           string  `json:"role"`
 }
 
 type MikroTikRegisterRequest struct {
@@ -567,44 +116,100 @@ type MikroTikRegisterRequest struct {
 	SiteID *string `json:"site_id"` // Optional for now
 }
 
-//var org OrganizationRequest
+// =================================
+// Bootstrap helpers (env + clients)
+// =================================
 
-func main() {
-	if err := godotenv.Load("../../config/backend_env/backend.env"); err != nil {
-		log.Println("âš ï¸ .env file not found at custom path â€” using system env vars")
+func loadEnv() {
+	// Essaie d'abord ./.env puis le chemin custom existant
+	if err := godotenv.Load(".env"); err != nil {
+		if err2 := godotenv.Load("../../config/backend_env/backend.env"); err2 != nil {
+			log.Println("âš ï¸ .env not found in standard or custom path â€” using system env vars only")
+		} else {
+			log.Println("âœ… Loaded env from ../../config/backend_env/backend.env")
+		}
+	} else {
+		log.Println("âœ… Loaded env from .env")
 	}
+}
 
-	var err error
-
+func initPostgres() {
 	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
 	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
+	pass := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 
-	if host == "" || user == "" || password == "" || dbname == "" {
-		log.Println("âš ï¸ One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
-	} else if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
-		log.Println("âš ï¸ InfluxDB environment variables are missing or incomplete.")
-	} else {
-		connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
-		db, err = sql.Open("postgres", connStr)
-		if err != nil {
-			log.Println("âŒ Failed to open DB connection:", err)
-		} else if err = db.Ping(); err != nil {
-			log.Println("âŒ Database connection test failed:", err)
-		} else {
-			fmt.Println("âœ… Connected to PostgreSQL successfully")
-		}
-
-		influxClient = influxdb2.NewClient(influxURL, influxToken)
-		fmt.Println("âœ… Connected to InfluxDB")
-		defer influxClient.Close()
+	if host == "" || port == "" || user == "" || pass == "" || dbname == "" {
+		log.Println("âš ï¸ Missing PostgreSQL env vars: POSTGRES_HOST/PORT/USER/PASSWORD/DB â€” DB features will be disabled")
+		return
 	}
 
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, pass, dbname,
+	)
+
+	var err error
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		log.Println("âŒ Failed to open DB:", err)
+		return
+	}
+	if err := db.Ping(); err != nil {
+		log.Println("âŒ Failed to connect to DB:", err)
+		db = nil
+		return
+	}
+	log.Println("âœ… Connected to PostgreSQL successfully")
+}
+
+func initInflux() {
+	influxToken = os.Getenv("INFLUXDB_TOKEN")
+	influxBucket = os.Getenv("INFLUXDB_BUCKET")
+	influxOrg = os.Getenv("INFLUXDB_ORG")
+	influxURL = os.Getenv("INFLUXDB_URL")
+
+	if influxToken == "" || influxBucket == "" || influxOrg == "" || influxURL == "" {
+		log.Println("âš ï¸ InfluxDB env vars missing or incomplete â€” Influx features will be disabled")
+		return
+	}
+	influxClient = influxdb2.NewClient(influxURL, influxToken)
+	log.Println("âœ… InfluxDB client initialized")
+}
+
+// Quick guards to avoid panics if DB/Influx not initialized
+func requireDB(w http.ResponseWriter) bool {
+	if db == nil {
+		http.Error(w, "Database not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+func requireInflux(w http.ResponseWriter) bool {
+	if influxClient == nil {
+		http.Error(w, "InfluxDB not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// =====
+// main
+// =====
+func main() {
+	loadEnv()
+
+	// Charger secrets aprÃ¨s loadEnv()
+	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
-		log.Println("âš ï¸ JWT_SECRET environment variable is not set â€” JWT will not work properly")
+		log.Println("âš ï¸ JWT_SECRET is not set â€” JWT will not work properly")
 	}
 
+	initPostgres()
+	initInflux()
+
+	// Routes
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/ping", withCORS(handlePing))
@@ -613,7 +218,7 @@ func main() {
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
 	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
-	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump)) // GET, ROS metrics dump
+	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump))
 	http.HandleFunc("/api/mikrotik/preregister", withCORS(handleMikrotikPreRegister))
 	http.HandleFunc("/api/mikrotik/list", withCORS(handleMikrotikList))
 	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
@@ -622,29 +227,41 @@ func main() {
 	http.HandleFunc("/api/mikrotik/associate", withCORS(handleMikrotikAssociate))
 	http.HandleFunc("/api/mikrotik", withCORS(handleMikrotikDelete)) // DELETE
 
-	fmt.Println("ðŸ” JWT Secret:", jwtSecret)
+	// Logs startup
+	masked := "<empty>"
+	if len(jwtSecret) > 0 {
+		masked = fmt.Sprintf("â€¢â€¢â€¢(%d bytes)", len(jwtSecret))
+	}
+	fmt.Println("ðŸ” JWT Secret:", masked)
 	fmt.Println("ðŸ“¦ Influx URL:", influxURL)
-	fmt.Println("ðŸš€ Server started at http://localhost:8080 (even if DB is down)")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	fmt.Println("ðŸš€ Server started at http://localhost:8000 (even if DB/Influx are down)")
+
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
+// =======
+// Helpers
+// =======
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Log request
+		fmt.Printf("ðŸ“¡ [%s] %s %s\n", time.Now().Format("15:04:05"), r.Method, r.URL.Path)
+		fmt.Println("ðŸ“¦ Headers:", r.Header)
+
 		origin := r.Header.Get("Origin")
-		fmt.Println("ðŸ“¦ Origin:", origin) // ðŸ‘ˆ Add this line
+		fmt.Println("ðŸŒ Origin:", origin)
 		allowedOrigins := []string{
 			"http://localhost:8080",
 			"http://localhost:8081",
 			"http://localhost:8082",
+			"http://localhost:8000",
 		}
-
 		for _, o := range allowedOrigins {
 			if origin == o {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				break
 			}
 		}
-
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -655,9 +272,15 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// ==================
+// Auth & User Routes
+// ==================
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -685,7 +308,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error": "Database insert failed: " + err.Error(),
 		})
 		return
@@ -711,7 +334,7 @@ Please log in and complete your profile.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User registered successfully. Check your email.",
 	})
 }
@@ -719,6 +342,9 @@ Please log in and complete your profile.
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -771,36 +397,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		resp["organization_id"] = nil
 	}
 
-	json.NewEncoder(w).Encode(resp)
-}
-
-func handlePing(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var data MikroTikData
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	fmt.Printf("ðŸ“¡ Ping received: %+v\n", data)
-
-	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
-
-	p := influxdb2.NewPointWithMeasurement("device_status").
-		AddTag("mac", data.MAC).
-		AddField("status", data.Status).
-		SetTime(time.Now())
-
-	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
-		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
@@ -827,7 +424,7 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
-	json.NewEncoder(w).Encode(claims)
+	_ = json.NewEncoder(w).Encode(claims)
 }
 
 func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -837,7 +434,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
 			return
 		}
-
 		const prefix = "Bearer "
 		if len(authHeader) <= len(prefix) || authHeader[:len(prefix)] != prefix {
 			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
@@ -845,7 +441,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		tokenString := authHeader[len(prefix):]
-
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -856,14 +451,48 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-
 		next(w, r)
 	}
+}
+
+// ==================
+// Influx data routes
+// ==================
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
+		return
+	}
+
+	var data MikroTikData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("ðŸ“¡ Ping received: %+v\n", data)
+
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
+	p := influxdb2.NewPointWithMeasurement("device_status").
+		AddTag("mac", data.MAC).
+		AddField("status", data.Status).
+		SetTime(time.Now())
+
+	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleRouters(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
 		return
 	}
 
@@ -883,7 +512,6 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var output []RouterStatus
-
 	for result.Next() {
 		record := result.Record()
 		mac := record.ValueByKey("mac")
@@ -896,19 +524,24 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 			Time:  record.Time().Format(time.RFC3339),
 		})
 	}
-
 	if result.Err() != nil {
 		http.Error(w, "Influx parse error: "+result.Err().Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(output)
+	_ = json.NewEncoder(w).Encode(output)
 }
 
+// ===========================
+// Organization & User routes
+// ===========================
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -917,7 +550,6 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	fmt.Printf("ðŸ“¥ Received OrganizationRequest:\n%+v\n", req)
 
 	var orgID string
@@ -934,20 +566,18 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	`, req.Name, req.Address, req.VATNumber, req.State, req.City, req.ZipCode,
 		req.ContactEmail, req.PecEmail, req.SdiCode, req.ContactPhone,
 		req.PersonnelInfo).Scan(&orgID)
-
 	if err != nil {
 		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
-
 	if err != nil {
 		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
@@ -958,13 +588,15 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
 
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
@@ -978,7 +610,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	case "operator":
 		roleID = 2
 	default:
-		roleID = 3 // default to User
+		roleID = 3 // default User
 	}
 
 	// Generate and hash password
@@ -987,7 +619,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
@@ -999,7 +630,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
     INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, now(), now())
   `, req.Email, string(hash), roleID, req.FirstName, req.LastName, req.OrganizationID)
-
 	if err != nil {
 		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1026,12 +656,14 @@ Please log in and change your password as soon as possible.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User created and password emailed",
 	})
 }
 
-// Connects to MikroTik RouterOS API and fetches system resource info
+// ============================================
+// MikroTik (resource + dump via MikroTik REST)
+// ============================================
 func getMikrotikSystemResource() (map[string]interface{}, error) {
 	host := os.Getenv("MIKROTIK_HOST")
 	port := os.Getenv("MIKROTIK_PORT")
@@ -1047,7 +679,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-
 	req.SetBasicAuth(user, pass)
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -1065,7 +696,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
-
 	return data, nil
 }
 
@@ -1081,13 +711,12 @@ func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// âœ… Print the response to console for debugging
 	fmt.Println("ðŸ“¦ MikroTik REST API Response:")
 	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
 	fmt.Println(string(prettyJSON))
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func getAllMikrotikMetricsAsText() (string, error) {
@@ -1133,12 +762,11 @@ func getAllMikrotikMetricsAsText() (string, error) {
 
 		builder.WriteString(fmt.Sprintf("===== %s =====\n", label))
 
-		// Attempt pretty JSON print
 		var prettyJSON bytes.Buffer
 		if json.Indent(&prettyJSON, body, "", "  ") == nil {
 			builder.Write(prettyJSON.Bytes())
 		} else {
-			builder.Write(body) // fallback
+			builder.Write(body)
 		}
 		builder.WriteString("\n\n")
 	}
@@ -1159,22 +787,18 @@ func handleMikrotikDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(result))
+	_, _ = w.Write([]byte(result))
 }
 
-//-------------------------------------------------
+// -------------------------------------------------
 // WireGuard pre-registration for MikroTik routers
-//-------------------------------------------------
-
-// WireGuard IP Pool
+// -------------------------------------------------
 var (
 	wireguardSubnet = "10.100.99.0/24"
 	startOffset     = 10
 )
 
-// Generates real WireGuard keys using wg tool
 func generateRealWGKeys() (string, string, error) {
-	// Run "wg genkey"
 	privateCmd := exec.Command("wg", "genkey")
 	privateOut := &bytes.Buffer{}
 	privateCmd.Stdout = privateOut
@@ -1183,7 +807,6 @@ func generateRealWGKeys() (string, string, error) {
 	}
 	privateKey := bytes.TrimSpace(privateOut.Bytes())
 
-	// Run "wg pubkey"
 	pubCmd := exec.Command("wg", "pubkey")
 	pubCmd.Stdin = bytes.NewReader(privateKey)
 	pubOut := &bytes.Buffer{}
@@ -1196,19 +819,20 @@ func generateRealWGKeys() (string, string, error) {
 	return string(privateKey), string(publicKey), nil
 }
 
-// Assigns next available IP from pool
 func getNextAvailableIP() (string, error) {
 	_, ipnet, err := net.ParseCIDR(wireguardSubnet)
 	if err != nil {
 		return "", fmt.Errorf("invalid subnet: %w", err)
 	}
-
 	baseIP := ipnet.IP.To4()
 	if baseIP == nil {
 		return "", fmt.Errorf("not a valid IPv4 subnet")
 	}
 
-	// Step 1: Load all currently assigned IPs from DB
+	if db == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+
 	rows, err := db.Query(`SELECT vpn_internal_ip FROM mikrotik_routers`)
 	if err != nil {
 		return "", fmt.Errorf("failed to query IPs from database: %w", err)
@@ -1218,27 +842,23 @@ func getNextAvailableIP() (string, error) {
 	usedIPs := make(map[string]bool)
 	for rows.Next() {
 		var ipStr string
-		if err := rows.Scan(&ipStr); err == nil {
+		if err := rows.Scan(&ipStr); err == nil && ipStr != "" {
 			usedIPs[ipStr] = true
 		}
 	}
 
-	// Step 2: Iterate over IP pool starting from .10
 	for i := startOffset; i < 255; i++ {
 		candidateIP := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(i)).String()
 		if !usedIPs[candidateIP] {
 			return candidateIP, nil
 		}
 	}
-
 	return "", fmt.Errorf("no available IPs in subnet")
 }
 
-// MikroTik registration logic
 func MikroTikPreRegister(mac string) (map[string]string, error) {
 	fmt.Println("ðŸ”§ Starting MikroTik registration for MAC:", mac)
 
-	// Step 1: Generate WireGuard keys
 	privateKey, publicKey, err := generateRealWGKeys()
 	if err != nil {
 		return nil, fmt.Errorf("key generation failed: %w", err)
@@ -1247,24 +867,20 @@ func MikroTikPreRegister(mac string) (map[string]string, error) {
 	fmt.Println("ðŸ”‘ Private Key:", privateKey)
 	fmt.Println("ðŸ” Public Key:", publicKey)
 
-	// Step 2: Assign IP
 	ip, err := getNextAvailableIP()
 	if err != nil {
 		return nil, fmt.Errorf("IP allocation failed: %w", err)
 	}
 	fmt.Println("âœ… Assigned IP:", ip)
 
-	// Step 3: Generate MikroTik config
 	mikrotikConfig := generateMikroTikConfig(privateKey, ip)
 	fmt.Println("ðŸ“„ MikroTik Configuration Script:\n", mikrotikConfig)
 
-	// Step 4: Generate server-side peer config
 	serverConf := fmt.Sprintf(`[Peer]
 PublicKey = %s
 AllowedIPs = %s/32`, publicKey, ip)
 	fmt.Println("ðŸ“„ WireGuard Peer (Server) Config:\n", serverConf)
 
-	// Step 5: Store into DB
 	_, err = db.Exec(`
 		INSERT INTO mikrotik_routers (
 			id, site_id, mac_address,
@@ -1283,7 +899,6 @@ AllowedIPs = %s/32`, publicKey, ip)
 		return nil, fmt.Errorf("database insert failed: %w", err)
 	}
 
-	// Step 6: Build return object
 	result := map[string]string{
 		"internal_ip":     ip,
 		"private_key":     privateKey,
@@ -1294,9 +909,7 @@ AllowedIPs = %s/32`, publicKey, ip)
 
 	if err := addWireGuardPeer(publicKey, ip); err != nil {
 		log.Println("âš ï¸ Could not add peer to WireGuard:", err)
-		// You can still return success here â€” the router will connect once wg0 is restarted or manually updated
 	}
-
 	return result, nil
 }
 
@@ -1307,43 +920,9 @@ func generateMikroTikConfig(privateKey, ip string) string {
 		privateKey, ip)
 }
 
-func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MikroTikRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// ðŸ›‘ Check for duplicates
-	var exists bool
-	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists)
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if exists {
-		http.Error(w, "MAC already registered", http.StatusConflict)
-		return
-	}
-
-	// âœ… Call MikroTikPreRegister and get config data
-	data, err := MikroTikPreRegister(req.MAC)
-	if err != nil {
-		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// âœ… Return JSON with config
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// Reuse your existing container name
+// =====================
+// MikroTik HTTP routes
+// =====================
 const wgContainer = "netsecure-iq-wireguard-1"
 
 type MikroTikRow struct {
@@ -1354,8 +933,10 @@ type MikroTikRow struct {
 	Status string // provisioning_status
 }
 
-// Look up a router by MAC
 func getRouterByMAC(mac string) (*MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	row := db.QueryRow(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip, 
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -1373,8 +954,10 @@ func getRouterByMAC(mac string) (*MikroTikRow, error) {
 	return &r, nil
 }
 
-// List all routers (for dashboard)
 func listRouters() ([]MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	rows, err := db.Query(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip,
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -1402,9 +985,7 @@ func listRouters() ([]MikroTikRow, error) {
 	return out, nil
 }
 
-// Add/remove peer inside the WireGuard container and persist to config file
 func addWireGuardPeer(publicKey, ip string) error {
-	// 1) Apply live (keeps current session working)
 	cmd := exec.Command("docker", "exec", wgContainer,
 		"wg", "set", "wg0",
 		"peer", publicKey,
@@ -1413,7 +994,6 @@ func addWireGuardPeer(publicKey, ip string) error {
 		return fmt.Errorf("wg add peer failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 2) Persist to /config/wg0.conf with real newlines (avoid adding duplicates)
 	script := fmt.Sprintf(`
 if ! grep -q "PublicKey = %s" /config/wg_confs/wg0.conf; then
   cat <<'EOF' >> /config/wg_confs/wg0.conf
@@ -1429,14 +1009,12 @@ fi
 	if out, err := appendCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to append peer to /config/wg_confs/wg0.conf: %v\nOutput: %s", err, string(out))
 	}
-
 	return nil
 }
 
 func removeWireGuardPeer(publicKey string) error {
 	cfgPath := "/config/wg_confs/wg0.conf"
 
-	// 1) Remove from live session
 	{
 		cmd := exec.Command("docker", "exec", wgContainer,
 			"wg", "set", "wg0", "peer", publicKey, "remove")
@@ -1445,7 +1023,6 @@ func removeWireGuardPeer(publicKey string) error {
 		}
 	}
 
-	// 2) Remove from persisted config (no backups, minimal logging)
 	script := fmt.Sprintf(`
 set -e
 CFG="%s"
@@ -1481,18 +1058,15 @@ mv "${CFG}.tmp" "$CFG"
 	if out, err := removeCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove peer from %s: %v\nOutput:\n%s", cfgPath, err, string(out))
 	}
-
 	return nil
 }
 
-// Ping from inside WireGuard container to the router's internal IP
 func pingFromWireGuard(ip string) error {
 	cmd := exec.Command("docker", "exec", wgContainer, "sh", "-c",
 		fmt.Sprintf("ping -c 1 -W 2 %s >/dev/null 2>&1", ip))
 	return cmd.Run() // nil == success
 }
 
-// Helper for status label used by frontend (Associated/Unassociated/Deactivated)
 func uiStatus(r MikroTikRow) string {
 	if strings.EqualFold(r.Status, "DISABLED") || strings.EqualFold(r.Status, "DEACTIVATED") {
 		return "Deactivated"
@@ -1503,11 +1077,50 @@ func uiStatus(r MikroTikRow) string {
 	return "Unassociated"
 }
 
+func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
+		return
+	}
+
+	var req MikroTikRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Duplicate check
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "MAC already registered", http.StatusConflict)
+		return
+	}
+
+	data, err := MikroTikPreRegister(req.MAC)
+	if err != nil {
+		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(data)
+}
+
 func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	items, err := listRouters()
 	if err != nil {
 		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
@@ -1530,7 +1143,7 @@ func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 type testReq struct {
@@ -1542,6 +1155,10 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req testReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1556,7 +1173,7 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 	err = pingFromWireGuard(rtr.IP)
 	resp := map[string]any{"ok": err == nil}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type macReq struct {
@@ -1568,6 +1185,10 @@ func handleMikrotikDisable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1596,6 +1217,10 @@ func handleMikrotikEnable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1629,6 +1254,10 @@ func handleMikrotikAssociate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req associateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" || req.SiteID == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1647,6 +1276,10 @@ func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only DELETE allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1665,196 +1298,6 @@ func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
 
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\main.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
-
-package middleware
-
-import (
-	"context"
-	"errors"
-	"net/http"
-	"os"
-	"strings"
-
-	"github.com/golang-jwt/jwt/v5"
-)
-
-type ctxKey string
-
-const (
-	CtxUserID         ctxKey = "user_id"
-	CtxRoleName       ctxKey = "role"
-	CtxRoleID         ctxKey = "role_id"
-	CtxOrganizationID ctxKey = "organization_id"
-)
-
-func JWT(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ah := r.Header.Get("Authorization")
-		if !strings.HasPrefix(ah, "Bearer ") {
-			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
-			return
-		}
-		raw := strings.TrimPrefix(ah, "Bearer ")
-		secret := []byte(os.Getenv("JWT_SECRET"))
-		if len(secret) == 0 {
-			http.Error(w, "JWT secret not configured", http.StatusInternalServerError)
-			return
-		}
-		token, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, errors.New("unexpected signing method")
-			}
-			return secret, nil
-		})
-		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
-		}
-		claims, _ := token.Claims.(jwt.MapClaims)
-		ctx := r.Context()
-		if v, _ := claims["user_id"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxUserID, v)
-		}
-		if v, _ := claims["role"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxRoleName, v)
-		}
-		if v, ok := claims["role_id"].(float64); ok {
-			ctx = context.WithValue(ctx, CtxRoleID, int(v))
-		}
-		if v, _ := claims["organization_id"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxOrganizationID, v)
-		}
-		next(w, r.WithContext(ctx))
-	}
-}
-
-func GetUserID(r *http.Request) string {
-	if v := r.Context().Value(CtxUserID); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-func GetRoleName(r *http.Request) string {
-	if v := r.Context().Value(CtxRoleName); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-func GetRoleID(r *http.Request) int {
-	if v := r.Context().Value(CtxRoleID); v != nil {
-		return v.(int)
-	}
-	return 0
-}
-func GetOrgID(r *http.Request) string {
-	if v := r.Context().Value(CtxOrganizationID); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
-
-package middleware
-
-import (
-	"database/sql"
-	"net/http"
-)
-
-// AttachPermissions est un "no-op" middleware ici (perms sont rÃ©solues dans /api/auth/me).
-// On le garde pour compatibilitÃ© avec ton main.go.
-func AttachPermissions(_ *sql.DB) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			next(w, r)
-		}
-	}
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
-
-package rbac
-
-import (
-	"net/http"
-
-	"netsecure-backend/middleware"
-)
-
-// EnforceOperatorScope est un simple wrapper : les handlers appliquent le filtre
-// (Admin -> tout ; Operator -> org ; User -> 403 sur endpoints admin/op).
-func EnforceOperatorScope(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		role := middleware.GetRoleName(r)
-		if role == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		// Ici on pourrait imposer des headers/contexte supplÃ©mentaires.
-		next(w, r)
-	}
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
-
-package wireguard
-
-import (
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
-	"sync/atomic"
-)
-
-var ipCounter uint32 = 10 // start from .10
-
-func GenerateKeyPair() (privateKey, publicKey string, err error) {
-	// âš ï¸ ceci n'est PAS une vraie clÃ© WireGuard, mais OK pour un PoC cÃ´tÃ© FE.
-	priv := make([]byte, 32)
-	if _, err = rand.Read(priv); err != nil {
-		return "", "", err
-	}
-	privateKey = base64.StdEncoding.EncodeToString(priv)
-	publicKey = base64.StdEncoding.EncodeToString(reverseBytes(priv))
-	return privateKey, publicKey, nil
-}
-
-func reverseBytes(b []byte) []byte {
-	n := len(b)
-	out := make([]byte, n)
-	for i := 0; i < n; i++ {
-		out[i] = b[n-1-i]
-	}
-	return out
-}
-
-func ReserveVPNIP() string {
-	n := atomic.AddUint32(&ipCounter, 1)
-	return fmt.Sprintf("10.10.10.%d/32", n%250+5)
-}
-
-func GenerateMikrotikScript(privateKey, ip string) string {
-	return fmt.Sprintf(`# MikroTik WireGuard onboarding script
-/interface wireguard add name=wg0 private-key="%s"
-/ip address add address=%s interface=wg0
-/interface wireguard peers add public-key="SERVER_PUBLIC_KEY" endpoint-address="vpn.example.com" endpoint-port=51820 allowed-address=0.0.0.0/0
-`, privateKey, ip)
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
@@ -2015,6 +1458,235 @@ body {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
+// src/frontend/src/appCore.js
+// Fusion de tous les utilitaires, stores, composables, helpers, API
+
+// ---- API base & HTTP helper ----
+export const API = (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') || 'http://localhost:8000';
+const defaultHeaders = { 'Content-Type': 'application/json' };
+export const authHeaders = () => {
+  const t = localStorage.getItem('token');
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+async function http(method, path, body, extraHeaders = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* no json body */ }
+  if (!res.ok) {
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+export const api = {
+  get: (p, h) => http('GET', p, undefined, h),
+  post: (p, b, h) => http('POST', p, b, h),
+  del: (p, b, h) => http('DELETE', p, b, h),
+};
+// ---- Domain APIs ----
+export const authApi = {
+  login: (email, password) => api.post('/api/login', { email, password }),
+  register: (email) => api.post('/api/register', { email }),
+  createUser: (payload) => api.post('/api/users', payload),
+  completeOrganization: (payload) => api.post('/api/complete-organization', payload),
+  async getCurrentUser() {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    const response = await fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!response.ok) throw new Error('Failed to fetch user');
+    return response.json();
+  }
+};
+export const agentsApi = {
+  list: () => api.get('/api/mikrotik/list'),
+  preregister: (mac, siteId = null) => api.post('/api/mikrotik/preregister', siteId ? { mac, site_id: siteId } : { mac }),
+  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),
+  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),
+  remove: (mac) => api.del('/api/mikrotik', { mac }),
+  test: (mac) => api.post('/api/mikrotik/test', { mac }),
+  associate: (mac, siteId) => api.post('/api/mikrotik/associate', { mac, site_id: siteId }),
+  delete: (mac) => api.post('/api/mikrotik/delete', { mac }),
+};
+
+// ---- Auth composable ----
+import { ref, computed } from 'vue';
+export const isAuthenticated = ref(!!localStorage.getItem('token'));
+export function login() { isAuthenticated.value = true; }
+export function logout() {
+  isAuthenticated.value = false;
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('organization_id');
+  localStorage.removeItem('user_id');
+  window.dispatchEvent(new Event('auth-changed'));
+  window.location.replace('/#/login');
+}
+export function useAuth() {
+  return { isAuthenticated, login, logout };
+}
+
+// ---- Pinia Auth Store ----
+import { defineStore } from 'pinia';
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(localStorage.getItem('token') || '');
+  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'));
+  const isAuthenticatedStore = computed(() => !!token.value);
+  const role = computed(() => user.value?.role || null);
+  function setAuth(newToken, newUser) {
+    token.value = newToken;
+    user.value = newUser;
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  }
+  function logoutStore() {
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+  return { token, user, isAuthenticated: isAuthenticatedStore, role, setAuth, logout: logoutStore };
+});
+
+// ---- Pinia Site Store ----
+export const useSiteStore = defineStore('site', {
+  state: () => ({ sites: [] }),
+  actions: {
+    async fetchSites() {
+      const auth = useAuthStore();
+      let url = '/api/sites';
+      this.sites = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } }).then(r => r.json());
+    }
+  },
+  getters: {
+    filteredSites(state) {
+      const auth = useAuthStore();
+      if (auth.role === 'Administrator') return state.sites;
+      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id);
+      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id));
+      return [];
+    }
+  }
+});
+
+// ---- ACL Helper ----
+export function can(user, needed) {
+  if (!user) return false;
+  const perms = new Set((user.permissions || []).map(String));
+  const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
+  return list.every(p => perms.has(String(p)));
+}
+export default can;
+
+// ---- Particles Utils ----
+let _scriptPromise = null;
+export function loadParticlesScript () {
+  if (typeof window !== 'undefined' && window.particlesJS) {
+    return Promise.resolve();
+  }
+  if (_scriptPromise) return _scriptPromise;
+  _scriptPromise = new Promise((resolve, reject) => {
+    try {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Failed to load particles.js'));
+      document.head.appendChild(s);
+    } catch (e) {
+      console.debug('[particles] creating script tag failed', e);
+      reject(e);
+    }
+  }).catch((e) => {
+    console.debug('[particles] script load failed', e);
+    throw e;
+  });
+  return _scriptPromise;
+}
+export function ensurePJSDom () {
+  try {
+    if (typeof window !== 'undefined' && !window.pJSDom) {
+      window.pJSDom = [];
+    }
+  } catch (e) { console.debug('[particles] ensurePJSDom error', e); }
+}
+export function destroyForId (id) {
+  try {
+    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      try {
+        const inst = list[i];
+        const el = inst?.pJS?.canvas?.el;
+        const hostId = (el && el.parentElement && el.parentElement.id) || inst?.tag?.id || null;
+        if (hostId === id) {
+          const vendors = inst?.pJS?.fn?.vendors;
+          if (vendors?.destroypJS) vendors.destroypJS();
+          if (vendors?.destroy) vendors.destroy();
+          list.splice(i, 1);
+        }
+      } catch (e) { console.debug('[particles] single destroy failed', e); }
+    }
+  } catch (e) { console.debug('[particles] destroyForId failed', e); }
+}
+export function safeRender (id, config) {
+  try {
+    const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+    if (!el) return false;
+    if (typeof window === 'undefined' || !window.particlesJS) return false;
+    destroyForId(id);
+    window.particlesJS(id, config);
+    return true;
+  } catch (e) { console.debug('[particles] render failed', e); return false; }
+}
+export function observeTheme (id, renderFn) {
+  const target = typeof document !== 'undefined' ? document.documentElement : null;
+  if (!target) return () => {};
+  const observer = new MutationObserver(() => {
+    try {
+      destroyForId(id);
+      renderFn?.();
+    } catch (e) { console.debug('[particles] theme change error', e); }
+  });
+  try { observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) { console.debug('[particles] observer start failed', e); }
+  return () => { try { observer.disconnect(); } catch (e) { console.debug('[particles] observer cleanup failed', e); } };
+}
+export function themeIsDark () {
+  try {
+    const t = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null;
+    return t !== 'light';
+  } catch (e) { console.debug('[particles] themeIsDark error', e); return true; }
+}
+export function defaultConfig (isDark = true) {
+  const baseColor = isDark ? '#00c2c2' : '#0ea5a5';
+  const linkColor = isDark ? '#5eead4' : '#14b8a6';
+  const bgColor = isDark ? '#0e111a' : '#f6f8fb';
+  return {
+    particles: {
+      number: { value: 60, density: { enable: true, value_area: 800 } },
+      color: { value: baseColor },
+      shape: { type: 'circle' },
+      opacity: { value: 0.4, random: false },
+      size: { value: 3, random: true },
+      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
+      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
+    },
+    retina_detect: true,
+    background: { color: bgColor }
+  };
+}
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddOperatorForm.vue =====
 
 
@@ -2046,7 +1718,7 @@ body {
 
 <script setup>
 import { ref } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 
 const email = ref('')
 const firstName = ref('')
@@ -2299,11 +1971,11 @@ const submitForm = async () => {
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 /* ---------- Champs ---------- */
 const firstName = ref('')
@@ -2566,6 +2238,395 @@ small.hint { color: var(--text-secondary); }
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddUserForm.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+<template>
+  <div class="login-page">
+    <!-- Canvas animé -->
+    <div id="login-particles"></div>
+
+    <!-- Formulaire de login -->
+    <div class="login-wrapper">
+      <div class="login-container">
+        <div class="login-card">
+          <h2 class="login-title">NetSecure-IQ</h2>
+          <h3 class="login-subtitle">Login to your account</h3>
+
+          <form @submit.prevent="login" class="login-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <input
+              v-model="password"
+              type="password"
+              placeholder="Password"
+              required
+            />
+            <button :disabled="loading" type="submit">
+              {{ loading ? "Loading..." : "Login" }}
+            </button>
+          </form>
+
+          <p class="login-footer">
+            Don't have an account?
+            <router-link to="/register">Register</router-link>
+          </p>
+
+          <p
+            v-if="message"
+            :class="['login-message', successMessage ? 'success' : 'error']"
+          >
+            {{ message }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const password = ref('')
+const message = ref('')
+const successMessage = ref(false)
+const loading = ref(false)
+const router = useRouter()
+const { login: setAuthLogin } = useAuth()
+
+/* Particles (sécurisé) */
+const ID = 'login-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+/* Auth */
+const login = async () => {
+  loading.value = true
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email.value,
+        password: password.value
+      })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Login failed')
+
+    message.value = 'Login successful! Redirecting...'
+    successMessage.value = true
+
+    // Stockage token & infos
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user_id', data.user_id)
+    localStorage.setItem('role', data.role?.toLowerCase() || '')
+    localStorage.setItem('organization_id', data.organization_id || '')
+
+    // informer l'app qu'on vient de se loguer (maj de la nav)
+    window.dispatchEvent(new Event('auth-changed'))
+
+    // Choix de la redirection
+    let redirectTo = '/dashboard'
+    const role = data.role?.toLowerCase()
+    if (role === 'user') redirectTo = '/routertable'
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
+
+    if (typeof setAuthLogin === 'function') setAuthLogin()
+    setTimeout(() => router.push(redirectTo), 200)
+  } catch (err) {
+    message.value = 'Error: ' + (err?.message || 'Unknown error')
+    successMessage.value = false
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Page entière */
+.login-page { position: relative; min-height: 100vh; overflow: hidden; }
+
+/* Canvas particles */
+#login-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #login-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+
+/* Conteneur */
+.login-container { width: 100%; max-width: 420px; }
+
+/* Carte de login */
+.login-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box;
+}
+
+/* Titres */
+.login-title { text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px; }
+.login-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+/* Form */
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+/* Inputs & bouton full-width */
+.login-form input, .login-form button { width: 100%; box-sizing: border-box; }
+
+/* Input style */
+.login-form input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey);
+  border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s;
+}
+.login-form input::placeholder { color: var(--text-secondary); }
+.login-form input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+/* Bouton */
+.login-form button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: background-color 0.2s;
+}
+.login-form button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+.login-form button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+/* Footer */
+.login-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.login-footer a { color: var(--primary-accent); margin-left: 4px; text-decoration: none; }
+.login-footer a:hover { color: var(--primary-hover); }
+
+/* Messages */
+.login-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.login-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.login-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
+<template>
+  <div>
+    <!-- Fond animÃ© derriÃ¨re tout -->
+    <div id="register-particles"></div>
+
+    <!-- Contenu du register -->
+    <div class="register-wrapper">
+      <div class="register-container">
+        <div class="register-card">
+          <h2 class="register-title">NetSecure-IQ</h2>
+          <h3 class="register-subtitle">Create your account</h3>
+
+          <form @submit.prevent="register" class="register-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <button type="submit" :disabled="loading">
+              {{ loading ? "Registering..." : "Register" }}
+            </button>
+          </form>
+
+          <p v-if="message" class="register-message success">{{ message }}</p>
+          <p v-if="error" class="register-message error">{{ error }}</p>
+
+          <p class="register-footer">
+            Already have an account?
+            <router-link to="/login">Login</router-link>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const message = ref('')
+const error = ref('')
+const loading = ref(false)
+const router = useRouter()
+
+/* Particles */
+const ID = 'register-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+const register = async () => {
+  message.value = ''
+  error.value = ''
+  loading.value = true
+
+  try {
+    // âš ï¸ Assure-toi que le backend expose bien POST /api/register.
+    const res = await fetch(`${API}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Registration failed')
+
+    message.value = data.message || 'Registration successful. Check your email.'
+    email.value = ''
+    setTimeout(() => router.push('/login'), 1500)
+  } catch (err) {
+    error.value = err?.message || 'Registration failed'
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Fond animÃ© */
+#register-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #register-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.register-wrapper {
+  position: relative; z-index: 10; display: flex; align-items: center; justify-content: center;
+  padding: 32px; min-height: 100vh;
+}
+
+.register-wrapper, .register-wrapper * {
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+.register-container { width: 100%; max-width: 420px; }
+
+.register-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box; width: 100%;
+}
+
+.register-title {
+  text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px;
+}
+
+.register-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+.register-form { display: flex; flex-direction: column; gap: 16px; }
+
+.register-form input, .register-form button { width: 100%; box-sizing: border-box; }
+
+input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey); border-radius: 6px;
+  padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s ease;
+}
+input::placeholder { color: var(--text-secondary); }
+input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: all 0.2s ease;
+}
+button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+.register-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.register-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.register-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+.register-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.register-footer a { color: var(--primary-accent); text-decoration: none; margin-left: 4px; }
+.register-footer a:hover { color: var(--primary-hover); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
 
 <template>
@@ -2577,7 +2638,7 @@ import { onMounted, onUnmounted } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'bg-particles'
 let stopObs = () => {}
@@ -3389,7 +3450,7 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'home-particles'
 let stopObs = () => {}
@@ -3580,12 +3641,12 @@ onBeforeUnmount(() => {
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../composables/useAuth'
-import { API } from '@/utils/api.js'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')
@@ -3832,7 +3893,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const CONTAINER_ID = 'org-particles'
 let stopObs = () => {}
@@ -4049,11 +4110,11 @@ span{ font-size:14px; color:var(--text-primary); }
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const router = useRouter()
 const message = ref('')
@@ -4350,11 +4411,11 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const message = ref('')
@@ -4512,6 +4573,8 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
                 <tr>
                   <th>MAC Address</th>
                   <th>Status</th>
+                  <th>Organization</th>
+                  <th>Site</th>
                   <th>Last Contact</th>
                 </tr>
               </thead>
@@ -4519,7 +4582,11 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
                 <tr v-for="r in routers" :key="r.mac">
                   <td class="mono">{{ r.mac }}</td>
                   <td><span :class="['state', stateClass(r.status)]">{{ label(r.status) }}</span></td>
-                  <td>{{ formatDate(r.time) }}</td>
+                  <td>{{ r.organization }}</td>
+                  <td>{{ r.site }}</td>
+                  <td :title="new Date(r.time).toLocaleString()">
+                    {{ formatRelativeTime(r.time) }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -4536,18 +4603,25 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
 const loading = ref(false)
 const error = ref('')
 
-function normalize(entry) {
+function normalize(router) {
+  // VÃ©rifier si le routeur est en ligne (dernier contact < 5 minutes)
+  const lastSeen = new Date(router.last_seen || router.time || new Date().toISOString())
+  const minutesSinceLastSeen = (new Date() - lastSeen) / (1000 * 60)
+  const isOnline = minutesSinceLastSeen < 5
+  
   return {
-    mac: entry.mac || entry.mac_address || entry.MAC || 'â€”',
-    status: (entry.status || entry.value || 'unknown').toString().toLowerCase(),
-    time: entry.time || entry.lastSeen || entry.timestamp || new Date().toISOString()
+    mac: router.mac || 'â€”',
+    status: isOnline ? 'online' : 'offline',
+    time: router.last_seen || router.time || new Date().toISOString(),
+    organization: router.organization || 'â€”',
+    site: router.site || 'â€”',
+    site_id: router.site_id || null
   }
 }
 function label(s) {
@@ -4560,27 +4634,61 @@ function formatDate(iso) {
   try { return new Date(iso).toLocaleString() } catch { return 'â€”' }
 }
 
+function formatRelativeTime(dateString) {
+  try {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffInSeconds = Math.floor((now - date) / 1000)
+    
+    if (diffInSeconds < 60) return 'Just now'
+    
+    const diffInMinutes = Math.floor(diffInSeconds / 60)
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`
+    
+    const diffInHours = Math.floor(diffInMinutes / 60)
+    if (diffInHours < 24) return `${diffInHours}h ago`
+    
+    const diffInDays = Math.floor(diffInHours / 24)
+    if (diffInDays < 30) return `${diffInDays}d ago`
+    
+    return date.toLocaleDateString()
+  } catch {
+    return 'â€”'
+  }
+}
+
 async function loadRouters() {
   loading.value = true
   error.value = ''
   try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`${API}/api/data/routers`, {
-      headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-    }).catch(() => null)
-
-    if (!res || !res.ok) throw new Error('Showing demo data (API unavailable).')
-    const raw = await res.json()
-    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
-    routers.value = list.map(normalize)
+    const API_BASE_URL = 'http://localhost:8000/api'
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch routers')
+    
+    const data = await response.json()
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid response format')
+    }
+    
+    // Trier par statut (en ligne d'abord) puis par date de dernier contact
+    routers.value = data
+      .map(normalize)
+      .sort((a, b) => {
+        if (a.status === b.status) {
+          return new Date(b.time) - new Date(a.time)
+        }
+        return a.status === 'online' ? -1 : 1
+      })
+    
   } catch (e) {
-    // Demo data for display
-    routers.value = [
-      { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
-      { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
-      { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
-    ]
-    error.value = e.message || 'Unknown error.'
+    console.error('Failed to load routers:', e)
+    error.value = 'Failed to load router data. Please try again.'
+    // Garder les donnÃ©es existantes en cas d'erreur
+    if (!routers.value.length) {
+      routers.value = [
+        { mac: 'E4:8D:8C:AA:01:11', status: 'offline', time: new Date().toISOString() },
+      ]
+    }
   } finally {
     loading.value = false
   }
@@ -4695,15 +4803,15 @@ onMounted(loadRouters)
         @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -4898,15 +5006,15 @@ onUnmounted(() => {
         @click="toggleTheme"
         :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -5063,7 +5171,7 @@ onUnmounted(() => {
 </template>
 
 <script setup>
-import { useAuth } from '@/composables/useAuth.js'
+import { useAuth } from '@/appCore.js'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const { isAuthenticated, logout } = useAuth()
@@ -5181,70 +5289,12 @@ onUnmounted(() => {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
-import { ref } from 'vue';
-
-const isAuthenticated = ref(false);
-
-function login() {
-  isAuthenticated.value = true;
-}
-
-function logout() {
-  isAuthenticated.value = false;
-  localStorage.removeItem('token');
-  localStorage.removeItem('role');
-  localStorage.removeItem('organization_id');
-  localStorage.removeItem('user_id');
-  window.dispatchEvent(new Event('auth-changed'));
-  // redirection propre
-  window.location.replace('/#/login');
-}
-
-export function useAuth() {
-  return { isAuthenticated, login, logout };
-}
+// src/frontend/src/core/index.js// Regroupe: utils/api.js, utils/authApi.js, utils/agentsApi.js,// composables/useAuth.js, stores/authStore.js, stores/siteStore.js,// helpers/acl.js, utils/particles.js// -------------------------------// API base & HTTP helper// -------------------------------export const API =  (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') ||  'http://localhost:8000';const defaultHeaders = { 'Content-Type': 'application/json' };export const authHeaders = () => {  const t = localStorage.getItem('token');  return t ? { Authorization: `Bearer ${t}` } : {};};async function http(method, path, body, extraHeaders = {}) {  const res = await fetch(`${API}${path}`, {    method,    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },    body: body != null ? JSON.stringify(body) : undefined,  });  let data = null;  try { data = await res.json(); } catch { /* no json body */ }  if (!res.ok) {    const msg = data?.error || data?.message || `HTTP ${res.status}`;    throw new Error(msg);  }  return data;}export const api = {  get: (p, h) => http('GET', p, undefined, h),  post: (p, b, h) => http('POST', p, b, h),  del: (p, b, h) => http('DELETE', p, b, h),};// -------------------------------// Domain APIs (auth / users / agents)// -------------------------------export const authApi = {  login: (email, password) => api.post('/api/login', { email, password }),  register: (email) => api.post('/api/register', { email }),  createUser: (payload) => api.post('/api/users', payload),  completeOrganization: (payload) =>    api.post('/api/complete-organization', payload),};export const agentsApi = {  list: () => api.get('/api/mikrotik/list'),  preregister: (mac) => api.post('/api/mikrotik/preregister', { mac }),  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),  remove: (mac) => api.del('/api/mikrotik', { mac }),  test: (mac) => api.post('/api/mikrotik/test', { mac }),  associate: (mac, site_id) => api.post('/api/mikrotik/associate', { mac, site_id }),};// -------------------------------// Minimal ACL helper// -------------------------------export const acl = {  can(role, allowed) {    const r = (role || '').toLowerCase();    const list = Array.isArray(allowed) ? allowed : [allowed];    return list.map(String).map(s => s.toLowerCase()).includes(r);  }};// -------------------------------// Global auth/site state + composable// (remplace stores/* + composables/useAuth.js)// -------------------------------import { reactive, computed } from 'vue';const _auth = reactive({  token: localStorage.getItem('token') || '',  role: (localStorage.getItem('role') || '').toLowerCase(),  user_id: localStorage.getItem('user_id') || '',  organization_id: localStorage.getItem('organization_id') || '',});const _site = reactive({  organization_id: localStorage.getItem('organization_id') || '',});function syncAuthToLocal(data = {}) {  if ('token' in data) localStorage.setItem('token', data.token || '');  if ('user_id' in data) localStorage.setItem('user_id', data.user_id || '');  if ('role' in data) localStorage.setItem('role', (data.role || '').toLowerCase());  if ('organization_id' in data) localStorage.setItem('organization_id', data.organization_id || '');}export function useAuth() {  const isLoggedIn = computed(() => !!_auth.token);  async function login(email, password) {    const data = await authApi.login(email, password);    Object.assign(_auth, {      token: data.token || '',      role: (data.role || '').toLowerCase(),      user_id: data.user_id || '',      organization_id: data.organization_id || '',    });    syncAuthToLocal(_auth);    _site.organization_id = _auth.organization_id;    window.dispatchEvent(new Event('auth-changed'));    return data;  }  function logout() {    Object.assign(_auth, { token: '', role: '', user_id: '', organization_id: '' });    syncAuthToLocal(_auth);    _site.organization_id = '';    window.dispatchEvent(new Event('auth-changed'));  }  return { state: _auth, isLoggedIn, login, logout };}export const authStore = {  state: _auth,  setOrganization(id) {    _auth.organization_id = id || '';    _site.organization_id = _auth.organization_id;    localStorage.setItem('organization_id', _auth.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};export const siteStore = {  state: _site,  setOrganization(id) {    _site.organization_id = id || '';    localStorage.setItem('organization_id', _site.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};// -------------------------------// Particles utilities (remplace utils/particles.js)// -------------------------------export function ensurePJSDom() {  if (!window.pJSDom) window.pJSDom = [];  return window.pJSDom;}export function themeIsDark() {  // dÃ©faut: dark si pas explicitement 'light'  return document.documentElement.getAttribute('data-theme') !== 'light';}export function defaultConfig(isDark = true) {  const color = isDark ? '#00c2c2' : '#0ea5a5';  const linkColor = isDark ? '#22d3ee' : '#0ea5a5';  return {    particles: {      number: { value: 40, density: { enable: true, value_area: 800 } },      color: { value: color },      shape: { type: 'circle' },      opacity: { value: 0.2 },      size: { value: 3, random: true },      line_linked: { enable: true, distance: 150, color: linkColor, opacity: 0.2, width: 1 },      move: { enable: true, speed: 2, out_mode: 'out' }    },    interactivity: {      detect_on: 'canvas',      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }    },    retina_detect: true  };}export function loadParticlesScript() {  return new Promise((resolve, reject) => {    if (window.particlesJS) return resolve();    const id = 'particlesjs-cdn';    if (document.getElementById(id)) {      document.getElementById(id).addEventListener('load', resolve, { once: true });      return;    }    const s = document.createElement('script');    s.id = id;    s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';    s.async = true;    s.onload = () => resolve();    s.onerror = (e) => reject(e);    document.head.appendChild(s);  });}export function destroyForId(containerId) {  try {    const list = ensurePJSDom();    for (let i = list.length - 1; i >= 0; i--) {      const inst = list[i];      const el = inst?.pJS?.canvas?.el?.parentNode || inst?.pJS?.canvas?.el;      if (!el) continue;      const same = (el.id === containerId);      if (same) {        // compat des versions        if (inst?.pJS?.fn?.vendors?.destroy) inst.pJS.fn.vendors.destroy();        if (inst?.pJS?.fn?.vendors?.destroypJS) inst.pJS.fn.vendors.destroypJS();        list.splice(i, 1);      }    }  } catch { /* ignore */ }}export function safeRender(containerId, config) {  if (!window.particlesJS || !document.getElementById(containerId)) return false;  destroyForId(containerId);  try {    window.particlesJS(containerId, config);    return true;  } catch {    return false;  }}export function observeTheme(containerId, renderFn) {  const mo = new MutationObserver(() => { renderFn(); });  mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });  const onStorage = () => renderFn();  window.addEventListener('storage', onStorage);  return () => { mo.disconnect(); window.removeEventListener('storage', onStorage); };}
 
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-import { ref, computed } from 'vue';
-
-const user = ref<{ email: string } | null>(null);
-
-export function useAuth() {
-  function login(email: string) {
-    user.value = { email };
-  }
-  function logout() {
-    user.value = null;
-  }
-  const isAuthenticated = computed(() => !!user.value);
-  return { user, isAuthenticated, login, logout };
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
-
-// src/helpers/acl.js
-
-export function can(user, needed) {
-    if (!user) return false;
-    const perms = new Set((user.permissions || []).map(String));
-    const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
-    return list.every(p => perms.has(String(p)));
-  }
-  
-  // Aussi un export default pour compatibilitÃ©
-  export default can;
-  
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\main.js =====
 
@@ -5272,7 +5322,7 @@ import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
 import DashboardOperator from '@/components/DashboardOperator.vue'
 
-import { useAuth } from '../composables/useAuth'
+import { useAuth } from '../appCore.js'
 
 const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
 const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
@@ -5336,391 +5386,6 @@ export default router
 
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\router\index.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('token') || '')
-  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
-
-  const isAuthenticated = computed(() => !!token.value)
-  const role = computed(() => user.value?.role || null)
-
-  function setAuth(newToken, newUser) {
-    token.value = newToken
-    user.value = newUser
-    localStorage.setItem('token', newToken)
-    localStorage.setItem('user', JSON.stringify(newUser))
-  }
-
-  function logout() {
-    token.value = ''
-    user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  }
-
-  return { token, user, isAuthenticated, role, setAuth, logout }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', {
-  state: () => ({
-  isAuthenticated: false,
-  user: null, // { email, role_id, organization_id }
-  token: ''
-    isAuthenticated: false,
-    user: null, // { email, role_id, organization_id }
-    token: ''
-  }),
-  getters: {
-  isAdmin: (state) => state.user?.role_id === 1,
-  isOperator: (state) => state.user?.role_id === 2,
-  isUser: (state) => state.user?.role_id === 3,
-    isAdmin: (state) => state.user?.role_id === 1,
-    isOperator: (state) => state.user?.role_id === 2,
-    isUser: (state) => state.user?.role_id === 3,
-  },
-  actions: {
-  logout() {
-    this.isAuthenticated = false
-    this.user = null
-    this.token = ''
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  },
-    logout() {
-      this.isAuthenticated = false
-      this.user = null
-      this.token = ''
-      localStorage.removeItem('token')
-      // Optionally: use router.push('/login') if router is available here
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-import { defineStore } from 'pinia'
-import { useAuthStore } from './authStore'
-
-export const useSiteStore = defineStore('site', {
-  state: () => ({
-    sites: [],
-  }),
-  actions: {
-    async fetchSites() {
-      const auth = useAuthStore()
-      let url = '/api/sites'
-      // Optionally add org/user filter params based on role
-      this.sites = await fetch(url, {
-        headers: { Authorization: `Bearer ${auth.token}` }
-      }).then(r => r.json())
-    }
-  },
-  getters: {
-    filteredSites(state) {
-      const auth = useAuthStore()
-      if (auth.role === 'Administrator') return state.sites
-      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id)
-      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id))
-      return []
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-// src/frontend/src/utils/agentsApi.js
-// Client minimal pour les endpoints MikroTik (agents) du backend.
-
-import { API } from '@/utils/api.js'
-
-function authHeaders() {
-  const t = localStorage.getItem('token') || ''
-  return {
-    'Content-Type': 'application/json',
-    ...(t ? { Authorization: 'Bearer ' + t } : {})
-  }
-}
-
-export async function listAgents() {
-  const res = await fetch(`${API}/api/mikrotik/list`, { headers: authHeaders() })
-  if (!res.ok) throw new Error('List failed')
-  return res.json() // [{ mac, ip, status, site_id }]
-}
-
-export async function preregister(mac, siteId = null) {
-  const body = siteId ? { mac, site_id: siteId } : { mac }
-  const res = await fetch(`${API}/api/mikrotik/preregister`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(body)
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Pre-register failed')
-  return data // { internal_ip, private_key, public_key, mikrotik_config, server_peer }
-}
-
-export async function testAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/test`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || 'Test failed')
-  return data // { ok: bool }
-}
-
-export async function disableAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/disable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Disable failed')
-}
-
-export async function enableAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/enable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Enable failed')
-}
-
-export async function associateAgent(mac, siteId) {
-  const res = await fetch(`${API}/api/mikrotik/associate`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac, site_id: siteId })
-  })
-  if (!res.ok) throw new Error('Associate failed')
-}
-
-export async function deleteAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Delete failed')
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-// src/frontend/src/utils/api.js
-
-export const API = 'http://localhost:8000';
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
-
-// src/frontend/src/utils/particles.js
-// Utilities to safely use particles.js (Vincent Garreau) with Vue & theme switching
-
-let _scriptPromise = null
-
-/**
- * Load particles.js from CDN once.
- * Resolves immediately if already present.
- */
-export function loadParticlesScript () {
-  if (typeof window !== 'undefined' && window.particlesJS) {
-    return Promise.resolve()
-  }
-  if (_scriptPromise) return _scriptPromise
-
-  _scriptPromise = new Promise((resolve, reject) => {
-    try {
-      const s = document.createElement('script')
-      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js'
-      s.async = true
-      s.onload = () => resolve()
-      s.onerror = () => reject(new Error('Failed to load particles.js'))
-      document.head.appendChild(s)
-    } catch (e) {
-      // not empty: log + reject
-      console.debug('[particles] creating script tag failed', e)
-      reject(e)
-    }
-  }).catch((e) => {
-    // not empty: log then rethrow for callers who care
-    console.debug('[particles] script load failed', e)
-    throw e
-  })
-
-  return _scriptPromise
-}
-
-/**
- * Ensure the global pJSDom array exists (created by the lib).
- */
-export function ensurePJSDom () {
-  try {
-    if (typeof window !== 'undefined' && !window.pJSDom) {
-      window.pJSDom = []
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] ensurePJSDom error', e)
-  }
-}
-
-/**
- * Destroy particles instance bound to a given container id.
- */
-export function destroyForId (id) {
-  try {
-    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : []
-    for (let i = list.length - 1; i >= 0; i--) {
-      try {
-        const inst = list[i]
-        const el = inst?.pJS?.canvas?.el
-        const hostId =
-          (el && el.parentElement && el.parentElement.id) ||
-          inst?.tag?.id ||
-          null
-        if (hostId === id) {
-          const vendors = inst?.pJS?.fn?.vendors
-          if (vendors?.destroypJS) vendors.destroypJS()
-          if (vendors?.destroy) vendors.destroy()
-          list.splice(i, 1)
-        }
-      } catch (e) {
-        // not empty
-        console.debug('[particles] single destroy failed', e)
-      }
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] destroyForId failed', e)
-  }
-}
-
-/**
- * Render particles into an element by id, defensively.
- * Returns true on success, false if skipped (no elem or no lib).
- */
-export function safeRender (id, config) {
-  try {
-    const el = typeof document !== 'undefined' ? document.getElementById(id) : null
-    if (!el) return false
-    if (typeof window === 'undefined' || !window.particlesJS) return false
-
-    destroyForId(id)
-    window.particlesJS(id, config)
-    return true
-  } catch (e) {
-    // not empty
-    console.debug('[particles] render failed', e)
-    return false
-  }
-}
-
-/**
- * Observe theme changes (data-theme attr on <html>) and re-render particles.
- * Returns a function to stop observing.
- */
-export function observeTheme (id, renderFn) {
-  const target = typeof document !== 'undefined' ? document.documentElement : null
-  if (!target) return () => {}
-
-  const observer = new MutationObserver(() => {
-    try {
-      destroyForId(id)
-      renderFn?.()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] theme change error', e)
-    }
-  })
-
-  try {
-    observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] })
-  } catch (e) {
-    // not empty
-    console.debug('[particles] observer start failed', e)
-  }
-
-  return () => {
-    try {
-      observer.disconnect()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] observer cleanup failed', e)
-    }
-  }
-}
-
-/**
- * Detect if current theme is dark based on data-theme attribute.
- */
-export function themeIsDark () {
-  try {
-    const t = typeof document !== 'undefined'
-      ? document.documentElement.getAttribute('data-theme')
-      : null
-    return t !== 'light'
-  } catch (e) {
-    // not empty
-    console.debug('[particles] themeIsDark error', e)
-    return true
-  }
-}
-
-/**
- * Minimal default config that adapts to theme.
- */
-export function defaultConfig (isDark = true) {
-  const baseColor = isDark ? '#00c2c2' : '#0ea5a5'
-  const linkColor = isDark ? '#5eead4' : '#14b8a6'
-  const bgColor = isDark ? '#0e111a' : '#f6f8fb'
-
-  return {
-    particles: {
-      number: { value: 60, density: { enable: true, value_area: 800 } },
-      color: { value: baseColor },
-      shape: { type: 'circle' },
-      opacity: { value: 0.4, random: false },
-      size: { value: 3, random: true },
-      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
-      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
-    },
-    retina_detect: true,
-    background: { color: bgColor }
-  }
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
 
@@ -5805,12 +5470,25 @@ export function defaultConfig (isDark = true) {
                   <td>
                     <span :class="['state', stateClass(a.status)]">{{ label(a.status) }}</span>
                   </td>
-                  <td>{{ a.organization || '—' }}</td>
-                  <td>{{ a.site || '—' }}</td>
+                  <td>{{ a.organization || 'â€”' }}</td>
+                  <td>{{ a.site || 'â€”' }}</td>
                 </tr>
 
-                <tr v-if="!filteredAgents.length">
-                  <td colspan="5" class="empty">No agents match your search.</td>
+                <tr v-if="isLoading">
+                  <td colspan="5" class="empty">
+                    <i class="fas fa-spinner fa-spin"></i> Loading agents...
+                  </td>
+                </tr>
+                <tr v-else-if="error">
+                  <td colspan="5" class="empty error">
+                    <i class="fas fa-exclamation-circle"></i> {{ error }}
+                  </td>
+                </tr>
+                <tr v-else-if="!filteredAgents.length">
+                  <td colspan="5" class="empty">
+                    <span v-if="query">No agents match your search.</span>
+                    <span v-else>No agents found. <a href="#" @click.prevent="$router.push('/agents/register')">Register a new agent</a></span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -5826,14 +5504,43 @@ export function defaultConfig (isDark = true) {
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
-/** Demo data (wire to your API when available) */
-const agents = ref([
-  { mac: 'AA:BB:CC:DD:EE:01', status: 'associated',   organization: 'Org1', site: 'SiteA' },
-  { mac: 'AA:BB:CC:DD:EE:02', status: 'unassociated', organization: '',     site: ''     },
-  { mac: 'AA:BB:CC:DD:EE:03', status: 'deactivated',  organization: 'Org2', site: ''     }
-])
+// API base URL
+const API_BASE_URL = 'http://localhost:8000/api'
+
+// Agents data
+const agents = ref([])
+const isLoading = ref(true)
+const error = ref(null)
+
+// Fetch agents from API
+const fetchAgents = async () => {
+  try {
+    isLoading.value = true
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch')
+    const data = await response.json()
+    agents.value = data.map(device => ({
+      mac: device.mac,
+      status: device.status || 'unassociated',
+      organization: device.organization || '',
+      site: device.site || '',
+      site_id: device.site_id || ''
+    }))
+  } catch (err) {
+    console.error('Failed to fetch agents:', err)
+    error.value = 'Failed to load agents. Please try again.'
+    showToast('Failed to load agents', 'error')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Initialize component
+onMounted(() => {
+  fetchAgents()
+})
 
 /** Search & selection */
 const query = ref('')
@@ -5864,22 +5571,81 @@ const showToast = (msg, type = 'success') => {
   setTimeout(() => (toast.value = ''), 2200)
 }
 
-function onAssociate() {
+async function onAssociate() {
   if (!selectedAgent.value) return
-  selectedAgent.value.status = 'associated'
-  showToast('Agent associated.')
+  
+  try {
+    const siteId = prompt('Enter Site ID to associate with this agent:')
+    if (!siteId) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/associate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac,
+        site_id: siteId
+      })
+    })
+    if (!response.ok) throw new Error('Association failed')
+    
+    await fetchAgents()
+    showToast('Agent associated successfully')
+  } catch (err) {
+    console.error('Association failed:', err)
+    showToast('Failed to associate agent', 'error')
+  }
 }
-function onDeactivate() {
+async function onDeactivate() {
   if (!selectedAgent.value) return
-  selectedAgent.value.status = 'deactivated'
-  showToast('Agent deactivated.', 'error')
+  
+  try {
+    const confirmDeactivate = confirm(`Are you sure you want to deactivate agent ${selectedAgent.value.mac}?`)
+    if (!confirmDeactivate) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/disable`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac
+      })
+    })
+    if (!response.ok) throw new Error('Deactivation failed')
+    
+    await fetchAgents()
+    showToast('Agent deactivated', 'success')
+  } catch (err) {
+    console.error('Deactivation failed:', err)
+    showToast('Failed to deactivate agent', 'error')
+  }
 }
-function onDelete() {
+async function onDelete() {
   if (!selectedAgent.value) return
-  agents.value = agents.value.filter((_, i) => i !== selectedIndex.value)
-  selectedAgent.value = null
-  selectedIndex.value = -1
-  showToast('Agent deleted.', 'error')
+  
+  try {
+    const confirmDelete = confirm(`Are you sure you want to delete agent ${selectedAgent.value.mac}? This action cannot be undone.`)
+    if (!confirmDelete) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mac: selectedAgent.value.mac })
+    })
+    if (!response.ok) throw new Error('Deletion failed')
+    
+    await fetchAgents()
+    selectedAgent.value = null
+    selectedIndex.value = -1
+    showToast('Agent deleted successfully', 'success')
+  } catch (err) {
+    console.error('Deletion failed:', err)
+    showToast('Failed to delete agent', 'error')
+  }
 }
 
 /** Display helpers */
@@ -6131,7 +5897,7 @@ function rowTint(status) {
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -6153,7 +5919,7 @@ function formatMac() {
 }
 const macValid = computed(() => /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac.value))
 
-import { preregister } from '@/utils/agentsApi.js'
+import { preregister } from '@/appCore.js'
 
 async function submit() {
   if (!macValid.value) return showToast('Invalid MAC address', false)
@@ -6414,28 +6180,29 @@ function downloadRsc() {
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/utils/agentsApi.js'
+import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
 
 /* ---------- State ---------- */
-const rows = ref([])           // [{mac, ip, status, site_id}]
-const loading = ref(false)
-const message = ref('')
-const ok = ref(false)
+const agents = ref([])           // DonnÃ©es des agents du backend
+const loading = ref(false)       // Ã‰tat de chargement
+const message = ref('')          // Message de statut
+const ok = ref(false)            // Ã‰tat du message (succÃ¨s/erreur)
+const error = ref(null)          // Erreur de chargement
 
-const selected = ref(new Set())
-const search = ref('')
-const statusFilter = ref('all') // 'all' | 'Associated' | 'Unassociated' | 'Deactivated'
+const selected = ref(new Set())  // Ã‰lÃ©ments sÃ©lectionnÃ©s
+const search = ref('')           // Terme de recherche
+const statusFilter = ref('all')  // Filtre par statut: 'all' | 'associated' | 'unassociated' | 'deactivated'
 
 /* ---------- Fetch list ---------- */
-async function load() {
+const load = async () => {
   loading.value = true
-  message.value = ''
+  error.value = null
   try {
-    const data = await listAgents()
-    rows.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    rows.value = []
-    message.value = 'Failed to load agents: ' + (e?.message || 'unknown error')
+    agents.value = await listAgents()
+  } catch (err) {
+    console.error('Failed to load agents:', err)
+    error.value = 'Failed to load agents. Please try again later.'
+    message.value = error.value
     ok.value = false
   } finally {
     loading.value = false
@@ -6446,10 +6213,18 @@ onMounted(load)
 /* ---------- Filters / selection ---------- */
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
-  return rows.value.filter(r => {
-    const s = String(r.status || '').toLowerCase()
-    const hitStatus =
-      statusFilter.value === 'all' ? true : r.status === statusFilter.value
+  return agents.value.filter(agent => {
+    // Filtre par recherche
+    const matchesSearch = !q || 
+      agent.mac.toLowerCase().includes(q) ||
+      (agent.organization && agent.organization.toLowerCase().includes(q)) ||
+      (agent.site_id && agent.site_id.toLowerCase().includes(q))
+    
+    // Filtre par statut
+    const matchesStatus = statusFilter.value === 'all' || 
+      agent.status.toLowerCase() === statusFilter.value.toLowerCase()
+    
+    return matchesSearch && matchesStatus
     const hitSearch =
       !q ||
       r.mac?.toLowerCase().includes(q) ||
@@ -6479,11 +6254,19 @@ function toggleAllVisible(e) {
 }
 
 /* ---------- Helpers ---------- */
-function badgeClass(st) {
-  if (st === 'Associated') return 'green'
-  if (st === 'Unassociated') return 'amber'
-  if (st === 'Deactivated') return 'red'
-  return 'gray'
+const badgeClass = (status) => {
+  if (!status) return 'secondary'
+  
+  switch (status.toLowerCase()) {
+    case 'associated':
+      return 'success'
+    case 'unassociated':
+      return 'warning'
+    case 'deactivated':
+      return 'danger'
+    default:
+      return 'secondary'
+  }
 }
 async function callJson(url, method, body) {
   const token = localStorage.getItem('token') || ''
@@ -6501,17 +6284,20 @@ async function callJson(url, method, body) {
 }
 
 /* ---------- Row actions ---------- */
-async function testPing(mac) {
+const testPing = async (mac) => {
   try {
-    const { ok: pong } = await testAgent(mac)
-    message.value = pong ? `Ping OK for ${mac}` : `Ping failed for ${mac}`
-    ok.value = !!pong
-  } catch (e) {
-    message.value = `Ping error for ${mac}: ${e.message}`
+    const data = await testAgent(mac)
+    message.value = data.message || 'Ping successful!'
+    ok.value = true
+    // Recharger la liste aprÃ¨s un test rÃ©ussi
+    await load()
+  } catch (err) {
+    message.value = err.message || 'Ping failed'
     ok.value = false
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
-async function activateOne(mac) {
+const activateOne = async (mac) => {
   try {
     await enableAgent(mac)
     ok.value = true
@@ -6522,83 +6308,99 @@ async function activateOne(mac) {
     message.value = `Activate failed for ${mac}: ${e.message}`
   }
 }
-async function deactivateOne(mac) {
+const deactivateOne = async (mac) => {
   try {
     await disableAgent(mac)
+    message.value = 'Agent deactivated!'
     ok.value = true
-    message.value = `Deactivated ${mac}`
     await load()
-  } catch (e) {
+  } catch (err) {
+    message.value = err.message || 'Deactivation failed'
     ok.value = false
-    message.value = `Deactivate failed for ${mac}: ${e.message}`
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
-async function deleteOne(mac) {
-  if (!confirm(`Delete agent ${mac} ?`)) return
+const deleteOne = async (mac) => {
+  if (!confirm('Are you sure you want to delete this agent?')) return
   try {
     await deleteAgent(mac)
+    message.value = 'Agent deleted!'
     ok.value = true
-    message.value = `Deleted ${mac}`
     await load()
-  } catch (e) {
+  } catch (err) {
+    message.value = err.message || 'Deletion failed'
     ok.value = false
-    message.value = `Delete failed for ${mac}: ${e.message}`
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
 
 /* ---------- Bulk actions ---------- */
-async function activateSelected() {
-  await bulk(selected.value, m => enableAgent(m), 'Activated')
+const activateSelected = () => bulk(selected.value, enableAgent, 'activate')
+const deactivateSelected = () => bulk(selected.value, disableAgent, 'deactivate')
+const deleteSelected = () => {
+  if (!confirm(`Delete ${selected.value.size} selected agents?`)) return
+  bulk(selected.value, deleteAgent, 'delete')
 }
-async function deactivateSelected() {
-  await bulk(selected.value, m => disableAgent(m), 'Deactivated')
-}
-async function deleteSelected() {
-  if (!confirm(`Delete ${selected.value.size} agent(s) ?`)) return
-  await bulk(selected.value, m => deleteAgent(m), 'Deleted')
-}
-async function bulk(set, fn, verb) {
-  message.value = ''
-  ok.value = true
-  try {
-    for (const mac of set) {
+const bulk = async (set, fn, verb) => {
+  if (set.size === 0) return
+  
+  const results = { success: 0, error: 0 }
+  const promises = Array.from(set).map(async mac => {
+    try {
       await fn(mac)
+      results.success++
+    } catch (err) {
+      console.error(`Failed to ${verb} ${mac}:`, err)
+      results.error++
     }
-    message.value = `${verb} ${set.size} agent(s).`
-    selected.value = new Set()
-    await load()
-  } catch (e) {
-    ok.value = false
-    message.value = `${verb} failed: ${e.message}`
-  }
+  })
+  
+  await Promise.all(promises)
+  message.value = `${verb} completed: ${results.success} succeeded, ${results.error} failed`
+  ok.value = results.error === 0
+  await load()
+  setTimeout(() => { message.value = '' }, 3000)
 }
 
 /* ---------- Associate (simple modal) ---------- */
 const showAssociate = ref(false)
 const associateSiteId = ref('')
-function openAssociate() {
+const openAssociate = () => {
+  if (selected.value.size === 0) return
   associateSiteId.value = ''
   showAssociate.value = true
 }
-function closeAssociate() {
+
+const closeAssociate = () => {
   showAssociate.value = false
 }
-async function confirmAssociate() {
-  const site_id = associateSiteId.value.trim()
-  if (!site_id) return
-  try {
-    for (const mac of selected.value) {
-      await associateAgent(mac, site_id)
-    }
-    ok.value = true
-    message.value = `Associated ${selected.value.size} agent(s) to site ${site_id}.`
-    selected.value = new Set()
-    closeAssociate()
-    await load()
-  } catch (e) {
+const confirmAssociate = async () => {
+  const siteId = associateSiteId.value.trim()
+  if (!siteId) {
+    message.value = 'Please enter a site ID'
     ok.value = false
-    message.value = `Association failed: ${e.message}`
+    setTimeout(() => { message.value = '' }, 3000)
+    return
   }
+
+  const macs = Array.from(selected.value)
+  const results = { success: 0, error: 0 }
+  
+  for (const mac of macs) {
+    try {
+      await associateAgent(mac, siteId)
+      results.success++
+    } catch (err) {
+      console.error(`Failed to associate ${mac}:`, err)
+      results.error++
+    }
+  }
+  
+  message.value = `Associated ${results.success} agents, ${results.error} failed`
+  ok.value = results.error === 0
+  closeAssociate()
+  await load()
+  setTimeout(() => { message.value = '' }, 3000)
 }
 </script>
 
@@ -6784,7 +6586,7 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
 
             <textarea class="code" readonly rows="12" :value="script"></textarea>
             <p class="note">
-              Apply the script via <em>Files → Run Script</em> or through the router CLI.
+              Apply the script via <em>Files ? Run Script</em> or through the router CLI.
             </p>
           </div>
 
@@ -6991,7 +6793,7 @@ function showToast(msg, type = 'success') {
 defineOptions({ name: 'LoginPage' })
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore } from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')

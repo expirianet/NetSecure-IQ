@@ -1,4 +1,4 @@
-<!-- src/frontend/src/views/agents/RegisterAgent.vue -->
+ï»¿<!-- src/frontend/src/components/agents/RegisterAgent.vue -->
 <template>
   <div class="register-agent-page">
     <BackgroundParticles />
@@ -36,7 +36,7 @@
               />
               <button class="btn primary" type="submit" :disabled="loading || !macValid">
                 <i class="fas fa-microchip"></i>
-                <span>{{ loading ? 'Generating…' : 'Generate Script' }}</span>
+                <span>{{ loading ? 'Generatingâ€¦' : 'Generate Script' }}</span>
               </button>
             </div>
 
@@ -82,7 +82,7 @@ const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
 const macValid = computed(() => macRe.test(mac.value))
 
 function formatMac() {
-  // Uppercase + auto-insert ":" (AA:BB:…)
+  // Uppercase + auto-insert ":" (AA:BB:â€¦)
   let v = mac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
   mac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
 }
@@ -236,3 +236,4 @@ function showToast(msg, type = 'success') {
   .row{ grid-template-columns: 1fr; }
 }
 </style>
+

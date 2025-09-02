@@ -1,4 +1,4 @@
-<!-- src/frontend/src/views/agents/AgentsList.vue -->
+﻿<!-- src/frontend/src/components/agents/AgentsList.vue -->
 <template>
   <div class="agents-page">
     <div class="card">
@@ -101,9 +101,9 @@
               <td>
                 <span :class="['badge', badgeClass(row.status)]">{{ row.status }}</span>
               </td>
-              <td>—<!-- non renvoyé par l'API /list --> </td>
-              <td>{{ row.site_id || '—' }}</td>
-              <td class="mono">{{ row.ip || '—' }}</td>
+              <td>â€”<!-- non renvoyÃ© par l'API /list --> </td>
+              <td>{{ row.site_id || 'â€”' }}</td>
+              <td class="mono">{{ row.ip || 'â€”' }}</td>
               <td class="right">
                 <button class="btn xs ghost" @click="testPing(row.mac)">
                   <i class="fas fa-satellite-dish"></i> Test
@@ -131,7 +131,7 @@
               <td colspan="7" class="empty">No agents match your filters.</td>
             </tr>
             <tr v-if="loading">
-              <td colspan="7" class="empty">Loading…</td>
+              <td colspan="7" class="empty">Loadingâ€¦</td>
             </tr>
           </tbody>
         </table>
@@ -165,13 +165,13 @@ import { ref, computed, onMounted } from 'vue'
 import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
 
 /* ---------- State ---------- */
-const agents = ref([])           // Données des agents du backend
-const loading = ref(false)       // État de chargement
+const agents = ref([])           // DonnÃ©es des agents du backend
+const loading = ref(false)       // Ã‰tat de chargement
 const message = ref('')          // Message de statut
-const ok = ref(false)            // État du message (succès/erreur)
+const ok = ref(false)            // Ã‰tat du message (succÃ¨s/erreur)
 const error = ref(null)          // Erreur de chargement
 
-const selected = ref(new Set())  // Éléments sélectionnés
+const selected = ref(new Set())  // Ã‰lÃ©ments sÃ©lectionnÃ©s
 const search = ref('')           // Terme de recherche
 const statusFilter = ref('all')  // Filtre par statut: 'all' | 'associated' | 'unassociated' | 'deactivated'
 
@@ -271,7 +271,7 @@ const testPing = async (mac) => {
     const data = await testAgent(mac)
     message.value = data.message || 'Ping successful!'
     ok.value = true
-    // Recharger la liste après un test réussi
+    // Recharger la liste aprÃ¨s un test rÃ©ussi
     await load()
   } catch (err) {
     message.value = err.message || 'Ping failed'
@@ -495,3 +495,4 @@ td.right, th.right { text-align: right; }
 [data-theme='light'] .badge.red   { background: rgba(239,68,68,.12); color:#dc2626; }
 [data-theme='light'] .badge.amber { background: rgba(245,158,11,.12); color:#d97706; }
 </style>
+

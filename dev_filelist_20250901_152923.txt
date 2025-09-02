@@ -1,166 +1,26 @@
 ﻿
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
 
-package auth
+# path: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env
 
+# --- PostgreSQL ---
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=yourpassword
+POSTGRES_DB=netsecure
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\cmd\api\main.go =====
+# --- JWT ---
+JWT_SECRET=your-secret-key-change-this-in-production
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
-
-package handlers
-
-import (
-	"database/sql"
-	"encoding/json"
-	"net/http"
-
-	middleware "netsecure-backend/middleware"
-)
-
-type AuthMeSitePerm struct {
-	SiteID          string `json:"site_id"`
-	ReadAccess      bool   `json:"read_access"`
-	WriteAccess     bool   `json:"write_access"`
-	CanReceiveAlert bool   `json:"can_receive_alerts"`
-}
-type AuthMeUser struct {
-	ID             string  `json:"id"`
-	Email          string  `json:"email"`
-	FirstName      *string `json:"first_name,omitempty"`
-	LastName       *string `json:"last_name,omitempty"`
-	RoleID         int     `json:"role_id"`
-	OrganizationID *string `json:"organization_id,omitempty"`
-	Attributes     *string `json:"attributes,omitempty"`
-	LastLoginAt    *string `json:"last_login_at,omitempty"`
-	RoleName       string  `json:"role_name"`
-}
-type AuthMeResponse struct {
-	User            AuthMeUser       `json:"user"`
-	Permissions     []string         `json:"permissions"`
-	SitePermissions []AuthMeSitePerm `json:"site_permissions"`
-}
-
-func HandleAuthMe(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		uid := middleware.GetUserID(r)
-		if uid == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		var u AuthMeUser
-		if err := db.QueryRow(`
-			SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-			       u.organization_id, u.attributes, u.last_login_at, r.name
-			  FROM users u
-			  JOIN roles r ON r.id = u.role_id
-			 WHERE u.id = $1
-		`, uid).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.RoleID,
-			&u.OrganizationID, &u.Attributes, &u.LastLoginAt, &u.RoleName); err != nil {
-			http.Error(w, "user not found", http.StatusUnauthorized)
-			return
-		}
-
-		perms := []string{}
-		rows, err := db.Query(`
-			SELECT p.name
-			  FROM role_permissions rp
-			  JOIN permissions p ON p.id = rp.permission_id
-			 WHERE rp.role_id = $1 AND (rp.read_access = TRUE OR rp.write_access = TRUE)
-		`, u.RoleID)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var n string
-				if err := rows.Scan(&n); err == nil {
-					perms = append(perms, n)
-				}
-			}
-		}
-
-		sperm := []AuthMeSitePerm{}
-		if u.RoleID == 3 {
-			sr, err := db.Query(`
-				SELECT site_id, read_access, write_access, can_receive_alerts
-				  FROM user_site_permissions
-				 WHERE user_id = $1
-			`, u.ID)
-			if err == nil {
-				defer sr.Close()
-				for sr.Next() {
-					var p AuthMeSitePerm
-					if err := sr.Scan(&p.SiteID, &p.ReadAccess, &p.WriteAccess, &p.CanReceiveAlert); err == nil {
-						sperm = append(sperm, p)
-					}
-				}
-			}
-		}
-
-		resp := AuthMeResponse{User: u, Permissions: perms, SitePermissions: sperm}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}
-}
+# --- InfluxDB ---
+INFLUXDB_URL=http://localhost:8086
+INFLUXDB_TOKEN=your-influxdb-token
+INFLUXDB_ORG=your-org
+INFLUXDB_BUCKET=netsecure
 
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\handlers\auth.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\auth\jwt.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\handlers\organization.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\agent.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\organization.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\models\user.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\repository\postgres.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
-
-package auth
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\internal\wireguard\wg.go =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\.env =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\main.go =====
 
@@ -192,17 +52,22 @@ import (
 	"gopkg.in/gomail.v2"
 )
 
-var db *sql.DB
-var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
-
+// ======================================================
+// Globals (valeurs affectÃ©es dans main() aprÃ¨s Load .env)
+// ======================================================
 var (
-	influxToken  = os.Getenv("INFLUXDB_TOKEN")
-	influxBucket = os.Getenv("INFLUXDB_BUCKET")
-	influxOrg    = os.Getenv("INFLUXDB_ORG")
-	influxURL    = os.Getenv("INFLUXDB_URL")
+	db          *sql.DB
+	jwtSecret   []byte
+	influxToken string
+	influxBucket string
+	influxOrg   string
+	influxURL   string
 	influxClient influxdb2.Client
 )
 
+// ======================
+// Request/Model structs
+// ======================
 type RegisterRequest struct {
 	Email string `json:"email"`
 }
@@ -243,7 +108,7 @@ type CreateUserRequest struct {
 	FirstName      string  `json:"first_name"`
 	LastName       string  `json:"last_name"`
 	OrganizationID *string `json:"organization_id"`
-	Role           string  `json:"role"` // <-- Add this field
+	Role           string  `json:"role"`
 }
 
 type MikroTikRegisterRequest struct {
@@ -251,86 +116,152 @@ type MikroTikRegisterRequest struct {
 	SiteID *string `json:"site_id"` // Optional for now
 }
 
-//var org OrganizationRequest
+// =================================
+// Bootstrap helpers (env + clients)
+// =================================
 
-func main() {
-	if err := godotenv.Load("../../config/backend_env/backend.env"); err != nil {
-		log.Println("âš ï¸ .env file not found at custom path â€” using system env vars")
+func loadEnv() {
+	// Essaie d'abord ./.env puis le chemin custom existant
+	if err := godotenv.Load(".env"); err != nil {
+		if err2 := godotenv.Load("../../config/backend_env/backend.env"); err2 != nil {
+			log.Println("âš ï¸ .env not found in standard or custom path â€” using system env vars only")
+		} else {
+			log.Println("âœ… Loaded env from ../../config/backend_env/backend.env")
+		}
+	} else {
+		log.Println("âœ… Loaded env from .env")
 	}
+}
 
-	var err error
-
+func initPostgres() {
 	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
 	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
+	pass := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 
-	if host == "" || user == "" || password == "" || dbname == "" {
-		log.Println("âš ï¸ One or more required environment variables are not set: POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB")
-	} else if influxToken == "" || influxOrg == "" || influxBucket == "" || influxURL == "" {
-		log.Println("âš ï¸ InfluxDB environment variables are missing or incomplete.")
-	} else {
-		connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, password, dbname)
-		db, err = sql.Open("postgres", connStr)
-		if err != nil {
-			log.Println("âŒ Failed to open DB connection:", err)
-		} else if err = db.Ping(); err != nil {
-			log.Println("âŒ Database connection test failed:", err)
-		} else {
-			fmt.Println("âœ… Connected to PostgreSQL successfully")
-		}
-
-		influxClient = influxdb2.NewClient(influxURL, influxToken)
-		fmt.Println("âœ… Connected to InfluxDB")
-		defer influxClient.Close()
+	if host == "" || port == "" || user == "" || pass == "" || dbname == "" {
+		log.Println("âš ï¸ Missing PostgreSQL env vars: POSTGRES_HOST/PORT/USER/PASSWORD/DB â€” DB features will be disabled")
+		return
 	}
 
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, pass, dbname,
+	)
+
+	var err error
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		log.Println("âŒ Failed to open DB:", err)
+		return
+	}
+	if err := db.Ping(); err != nil {
+		log.Println("âŒ Failed to connect to DB:", err)
+		db = nil
+		return
+	}
+	log.Println("âœ… Connected to PostgreSQL successfully")
+}
+
+func initInflux() {
+	influxToken = os.Getenv("INFLUXDB_TOKEN")
+	influxBucket = os.Getenv("INFLUXDB_BUCKET")
+	influxOrg = os.Getenv("INFLUXDB_ORG")
+	influxURL = os.Getenv("INFLUXDB_URL")
+
+	if influxToken == "" || influxBucket == "" || influxOrg == "" || influxURL == "" {
+		log.Println("âš ï¸ InfluxDB env vars missing or incomplete â€” Influx features will be disabled")
+		return
+	}
+	influxClient = influxdb2.NewClient(influxURL, influxToken)
+	log.Println("âœ… InfluxDB client initialized")
+}
+
+// Quick guards to avoid panics if DB/Influx not initialized
+func requireDB(w http.ResponseWriter) bool {
+	if db == nil {
+		http.Error(w, "Database not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+func requireInflux(w http.ResponseWriter) bool {
+	if influxClient == nil {
+		http.Error(w, "InfluxDB not initialized", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// =====
+// main
+// =====
+func main() {
+	loadEnv()
+
+	// Charger secrets aprÃ¨s loadEnv()
+	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
-		log.Println("âš ï¸ JWT_SECRET environment variable is not set â€” JWT will not work properly")
+		log.Println("âš ï¸ JWT_SECRET is not set â€” JWT will not work properly")
 	}
 
+	initPostgres()
+	initInflux()
+
+	// Routes
 	http.HandleFunc("/api/register", withCORS(handleRegister))
 	http.HandleFunc("/api/login", withCORS(handleLogin))
 	http.HandleFunc("/api/ping", withCORS(handlePing))
 	http.HandleFunc("/api/protected", withCORS(jwtMiddleware(handleProtected)))
 	http.HandleFunc("/api/data/routers", withCORS(jwtMiddleware(handleRouters)))
 	http.HandleFunc("/api/complete-organization", withCORS(handleCompleteOrganization))
-	http.HandleFunc("/api/users", withCORS(jwtMiddleware(handleCreateUser)))
+	http.HandleFunc("/api/users", withCORS(handleCreateUser))
 	http.HandleFunc("/api/mikrotik/resource", withCORS(handleMikrotikResource))
-	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump)) // GET, ROS metrics dump
+	http.HandleFunc("/api/mikrotik/dump", withCORS(handleMikrotikDump))
+	http.HandleFunc("/api/mikrotik/preregister", withCORS(handleMikrotikPreRegister))
+	http.HandleFunc("/api/mikrotik/list", withCORS(handleMikrotikList))
+	http.HandleFunc("/api/mikrotik/test", withCORS(handleMikrotikTest))
+	http.HandleFunc("/api/mikrotik/disable", withCORS(handleMikrotikDisable))
+	http.HandleFunc("/api/mikrotik/enable", withCORS(handleMikrotikEnable))
+	http.HandleFunc("/api/mikrotik/associate", withCORS(handleMikrotikAssociate))
+	http.HandleFunc("/api/mikrotik", withCORS(handleMikrotikDelete)) // DELETE
 
-	// ðŸ” PROTÃ‰GER LES ENDPOINTS AGENTS (MikroTik)
-	http.HandleFunc("/api/mikrotik/list", withCORS(jwtMiddleware(handleMikrotikList)))
-	http.HandleFunc("/api/mikrotik/preregister", withCORS(jwtMiddleware(handleMikrotikPreRegister)))
-	http.HandleFunc("/api/mikrotik/test", withCORS(jwtMiddleware(handleMikrotikTest)))
-	http.HandleFunc("/api/mikrotik/disable", withCORS(jwtMiddleware(handleMikrotikDisable)))
-	http.HandleFunc("/api/mikrotik/enable", withCORS(jwtMiddleware(handleMikrotikEnable)))
-	http.HandleFunc("/api/mikrotik/associate", withCORS(jwtMiddleware(handleMikrotikAssociate)))
-	http.HandleFunc("/api/mikrotik", withCORS(jwtMiddleware(handleMikrotikDelete))) // DELETE
-
-	fmt.Println("ðŸ” JWT Secret:", jwtSecret)
+	// Logs startup
+	masked := "<empty>"
+	if len(jwtSecret) > 0 {
+		masked = fmt.Sprintf("â€¢â€¢â€¢(%d bytes)", len(jwtSecret))
+	}
+	fmt.Println("ðŸ” JWT Secret:", masked)
 	fmt.Println("ðŸ“¦ Influx URL:", influxURL)
-	fmt.Println("ðŸš€ Server started at http://localhost:8080 (even if DB is down)")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	fmt.Println("ðŸš€ Server started at http://localhost:8000 (even if DB/Influx are down)")
+
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
+// =======
+// Helpers
+// =======
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Log request
+		fmt.Printf("ðŸ“¡ [%s] %s %s\n", time.Now().Format("15:04:05"), r.Method, r.URL.Path)
+		fmt.Println("ðŸ“¦ Headers:", r.Header)
+
 		origin := r.Header.Get("Origin")
-		fmt.Println("ðŸ“¦ Origin:", origin) // ðŸ‘ˆ Add this line
+		fmt.Println("ðŸŒ Origin:", origin)
 		allowedOrigins := []string{
 			"http://localhost:8080",
 			"http://localhost:8081",
 			"http://localhost:8082",
+			"http://localhost:8000",
 		}
-
 		for _, o := range allowedOrigins {
 			if origin == o {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				break
 			}
 		}
-
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -341,9 +272,15 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// ==================
+// Auth & User Routes
+// ==================
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -371,7 +308,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec(`INSERT INTO users (email, password_hash, role_id) VALUES ($1, $2, $3)`, req.Email, string(hash), 2)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error": "Database insert failed: " + err.Error(),
 		})
 		return
@@ -397,7 +334,7 @@ Please log in and complete your profile.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User registered successfully. Check your email.",
 	})
 }
@@ -405,6 +342,9 @@ Please log in and complete your profile.
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -457,36 +397,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		resp["organization_id"] = nil
 	}
 
-	json.NewEncoder(w).Encode(resp)
-}
-
-func handlePing(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var data MikroTikData
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	fmt.Printf("ðŸ“¡ Ping received: %+v\n", data)
-
-	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
-
-	p := influxdb2.NewPointWithMeasurement("device_status").
-		AddTag("mac", data.MAC).
-		AddField("status", data.Status).
-		SetTime(time.Now())
-
-	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
-		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
@@ -513,7 +424,7 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
-	json.NewEncoder(w).Encode(claims)
+	_ = json.NewEncoder(w).Encode(claims)
 }
 
 func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -523,7 +434,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
 			return
 		}
-
 		const prefix = "Bearer "
 		if len(authHeader) <= len(prefix) || authHeader[:len(prefix)] != prefix {
 			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
@@ -531,7 +441,6 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		tokenString := authHeader[len(prefix):]
-
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -542,14 +451,48 @@ func jwtMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-
 		next(w, r)
 	}
+}
+
+// ==================
+// Influx data routes
+// ==================
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
+		return
+	}
+
+	var data MikroTikData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("ðŸ“¡ Ping received: %+v\n", data)
+
+	writeAPI := influxClient.WriteAPIBlocking(influxOrg, influxBucket)
+	p := influxdb2.NewPointWithMeasurement("device_status").
+		AddTag("mac", data.MAC).
+		AddField("status", data.Status).
+		SetTime(time.Now())
+
+	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+		http.Error(w, "Failed to write to InfluxDB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleRouters(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireInflux(w) {
 		return
 	}
 
@@ -569,7 +512,6 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var output []RouterStatus
-
 	for result.Next() {
 		record := result.Record()
 		mac := record.ValueByKey("mac")
@@ -582,19 +524,24 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 			Time:  record.Time().Format(time.RFC3339),
 		})
 	}
-
 	if result.Err() != nil {
 		http.Error(w, "Influx parse error: "+result.Err().Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(output)
+	_ = json.NewEncoder(w).Encode(output)
 }
 
+// ===========================
+// Organization & User routes
+// ===========================
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
 		return
 	}
 
@@ -603,7 +550,6 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	fmt.Printf("ðŸ“¥ Received OrganizationRequest:\n%+v\n", req)
 
 	var orgID string
@@ -620,20 +566,18 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	`, req.Name, req.Address, req.VATNumber, req.State, req.City, req.ZipCode,
 		req.ContactEmail, req.PecEmail, req.SdiCode, req.ContactPhone,
 		req.PersonnelInfo).Scan(&orgID)
-
 	if err != nil {
 		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
-
 	if err != nil {
 		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message":         "Organization created and linked successfully",
 		"organization_id": orgID,
 	})
@@ -644,13 +588,15 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
 
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
-
 	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
@@ -664,7 +610,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	case "operator":
 		roleID = 2
 	default:
-		roleID = 3 // default to User
+		roleID = 3 // default User
 	}
 
 	// Generate and hash password
@@ -673,7 +619,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
 		return
 	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(generatedPassword), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
@@ -685,7 +630,6 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
     INSERT INTO users (email, password_hash, role_id, first_name, last_name, organization_id, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, now(), now())
   `, req.Email, string(hash), roleID, req.FirstName, req.LastName, req.OrganizationID)
-
 	if err != nil {
 		http.Error(w, "Database insert failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -712,12 +656,14 @@ Please log in and change your password as soon as possible.
 		log.Println("Failed to send email:", err)
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "User created and password emailed",
 	})
 }
 
-// Connects to MikroTik RouterOS API and fetches system resource info
+// ============================================
+// MikroTik (resource + dump via MikroTik REST)
+// ============================================
 func getMikrotikSystemResource() (map[string]interface{}, error) {
 	host := os.Getenv("MIKROTIK_HOST")
 	port := os.Getenv("MIKROTIK_PORT")
@@ -733,7 +679,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-
 	req.SetBasicAuth(user, pass)
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -751,7 +696,6 @@ func getMikrotikSystemResource() (map[string]interface{}, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
-
 	return data, nil
 }
 
@@ -767,13 +711,12 @@ func handleMikrotikResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// âœ… Print the response to console for debugging
 	fmt.Println("ðŸ“¦ MikroTik REST API Response:")
 	prettyJSON, _ := json.MarshalIndent(data, "", "  ")
 	fmt.Println(string(prettyJSON))
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func getAllMikrotikMetricsAsText() (string, error) {
@@ -819,12 +762,11 @@ func getAllMikrotikMetricsAsText() (string, error) {
 
 		builder.WriteString(fmt.Sprintf("===== %s =====\n", label))
 
-		// Attempt pretty JSON print
 		var prettyJSON bytes.Buffer
 		if json.Indent(&prettyJSON, body, "", "  ") == nil {
 			builder.Write(prettyJSON.Bytes())
 		} else {
-			builder.Write(body) // fallback
+			builder.Write(body)
 		}
 		builder.WriteString("\n\n")
 	}
@@ -845,22 +787,18 @@ func handleMikrotikDump(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(result))
+	_, _ = w.Write([]byte(result))
 }
 
-//-------------------------------------------------
+// -------------------------------------------------
 // WireGuard pre-registration for MikroTik routers
-//-------------------------------------------------
-
-// WireGuard IP Pool
+// -------------------------------------------------
 var (
 	wireguardSubnet = "10.100.99.0/24"
 	startOffset     = 10
 )
 
-// Generates real WireGuard keys using wg tool
 func generateRealWGKeys() (string, string, error) {
-	// Run "wg genkey"
 	privateCmd := exec.Command("wg", "genkey")
 	privateOut := &bytes.Buffer{}
 	privateCmd.Stdout = privateOut
@@ -869,7 +807,6 @@ func generateRealWGKeys() (string, string, error) {
 	}
 	privateKey := bytes.TrimSpace(privateOut.Bytes())
 
-	// Run "wg pubkey"
 	pubCmd := exec.Command("wg", "pubkey")
 	pubCmd.Stdin = bytes.NewReader(privateKey)
 	pubOut := &bytes.Buffer{}
@@ -882,19 +819,20 @@ func generateRealWGKeys() (string, string, error) {
 	return string(privateKey), string(publicKey), nil
 }
 
-// Assigns next available IP from pool
 func getNextAvailableIP() (string, error) {
 	_, ipnet, err := net.ParseCIDR(wireguardSubnet)
 	if err != nil {
 		return "", fmt.Errorf("invalid subnet: %w", err)
 	}
-
 	baseIP := ipnet.IP.To4()
 	if baseIP == nil {
 		return "", fmt.Errorf("not a valid IPv4 subnet")
 	}
 
-	// Step 1: Load all currently assigned IPs from DB
+	if db == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+
 	rows, err := db.Query(`SELECT vpn_internal_ip FROM mikrotik_routers`)
 	if err != nil {
 		return "", fmt.Errorf("failed to query IPs from database: %w", err)
@@ -904,53 +842,45 @@ func getNextAvailableIP() (string, error) {
 	usedIPs := make(map[string]bool)
 	for rows.Next() {
 		var ipStr string
-		if err := rows.Scan(&ipStr); err == nil {
+		if err := rows.Scan(&ipStr); err == nil && ipStr != "" {
 			usedIPs[ipStr] = true
 		}
 	}
 
-	// Step 2: Iterate over IP pool starting from .10
 	for i := startOffset; i < 255; i++ {
 		candidateIP := net.IPv4(baseIP[0], baseIP[1], baseIP[2], byte(i)).String()
 		if !usedIPs[candidateIP] {
 			return candidateIP, nil
 		}
 	}
-
 	return "", fmt.Errorf("no available IPs in subnet")
 }
 
-// MikroTik registration logic
 func MikroTikPreRegister(mac string) (map[string]string, error) {
-	fmt.Println("ðŸ›  Starting MikroTik registration for MAC:", mac)
+	fmt.Println("ðŸ”§ Starting MikroTik registration for MAC:", mac)
 
-	// Step 1: Generate WireGuard keys
 	privateKey, publicKey, err := generateRealWGKeys()
 	if err != nil {
 		return nil, fmt.Errorf("key generation failed: %w", err)
 	}
 	fmt.Println("âœ… WireGuard Keys Generated")
-	fmt.Println("ðŸ”“ Private Key:", privateKey)
+	fmt.Println("ðŸ”‘ Private Key:", privateKey)
 	fmt.Println("ðŸ” Public Key:", publicKey)
 
-	// Step 2: Assign IP
 	ip, err := getNextAvailableIP()
 	if err != nil {
 		return nil, fmt.Errorf("IP allocation failed: %w", err)
 	}
 	fmt.Println("âœ… Assigned IP:", ip)
 
-	// Step 3: Generate MikroTik config
 	mikrotikConfig := generateMikroTikConfig(privateKey, ip)
-	fmt.Println("ðŸ“ MikroTik Configuration Script:\n", mikrotikConfig)
+	fmt.Println("ðŸ“„ MikroTik Configuration Script:\n", mikrotikConfig)
 
-	// Step 4: Generate server-side peer config
 	serverConf := fmt.Sprintf(`[Peer]
 PublicKey = %s
 AllowedIPs = %s/32`, publicKey, ip)
-	fmt.Println("ðŸ“ WireGuard Peer (Server) Config:\n", serverConf)
+	fmt.Println("ðŸ“„ WireGuard Peer (Server) Config:\n", serverConf)
 
-	// Step 5: Store into DB
 	_, err = db.Exec(`
 		INSERT INTO mikrotik_routers (
 			id, site_id, mac_address,
@@ -969,7 +899,6 @@ AllowedIPs = %s/32`, publicKey, ip)
 		return nil, fmt.Errorf("database insert failed: %w", err)
 	}
 
-	// Step 6: Build return object
 	result := map[string]string{
 		"internal_ip":     ip,
 		"private_key":     privateKey,
@@ -980,9 +909,7 @@ AllowedIPs = %s/32`, publicKey, ip)
 
 	if err := addWireGuardPeer(publicKey, ip); err != nil {
 		log.Println("âš ï¸ Could not add peer to WireGuard:", err)
-		// You can still return success here â€” the router will connect once wg0 is restarted or manually updated
 	}
-
 	return result, nil
 }
 
@@ -993,43 +920,9 @@ func generateMikroTikConfig(privateKey, ip string) string {
 		privateKey, ip)
 }
 
-func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MikroTikRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// ðŸ›¡ Check for duplicates
-	var exists bool
-	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists)
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if exists {
-		http.Error(w, "MAC already registered", http.StatusConflict)
-		return
-	}
-
-	// âœ… Call MikroTikPreRegister and get config data
-	data, err := MikroTikPreRegister(req.MAC)
-	if err != nil {
-		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// âœ… Return JSON with config
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// Reuse your existing container name
+// =====================
+// MikroTik HTTP routes
+// =====================
 const wgContainer = "netsecure-iq-wireguard-1"
 
 type MikroTikRow struct {
@@ -1040,8 +933,10 @@ type MikroTikRow struct {
 	Status string // provisioning_status
 }
 
-// Look up a router by MAC
 func getRouterByMAC(mac string) (*MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	row := db.QueryRow(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip, 
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -1059,8 +954,10 @@ func getRouterByMAC(mac string) (*MikroTikRow, error) {
 	return &r, nil
 }
 
-// List all routers (for dashboard)
 func listRouters() ([]MikroTikRow, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
 	rows, err := db.Query(`
 		SELECT mac_address, vpn_public_key, vpn_internal_ip,
 		       COALESCE(provisioning_status,'PENDING') AS provisioning_status,
@@ -1088,9 +985,7 @@ func listRouters() ([]MikroTikRow, error) {
 	return out, nil
 }
 
-// Add/remove peer inside the WireGuard container and persist to config file
 func addWireGuardPeer(publicKey, ip string) error {
-	// 1) Apply live (keeps current session working)
 	cmd := exec.Command("docker", "exec", wgContainer,
 		"wg", "set", "wg0",
 		"peer", publicKey,
@@ -1099,7 +994,6 @@ func addWireGuardPeer(publicKey, ip string) error {
 		return fmt.Errorf("wg add peer failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 2) Persist to /config/wg0.conf with real newlines (avoid adding duplicates)
 	script := fmt.Sprintf(`
 if ! grep -q "PublicKey = %s" /config/wg_confs/wg0.conf; then
   cat <<'EOF' >> /config/wg_confs/wg0.conf
@@ -1115,57 +1009,25 @@ fi
 	if out, err := appendCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to append peer to /config/wg_confs/wg0.conf: %v\nOutput: %s", err, string(out))
 	}
-
 	return nil
 }
 
 func removeWireGuardPeer(publicKey string) error {
-	cfgPath := "/config/wg_confs/wg0.conf" // same path you use in addWireGuardPeer
+	cfgPath := "/config/wg_confs/wg0.conf"
 
-	// 0) Show live peers before
-	{
-		cmd := exec.Command("docker", "exec", wgContainer, "wg", "show", "wg0", "peers")
-		if out, err := cmd.CombinedOutput(); err == nil {
-			fmt.Printf("DEBUG: live peers BEFORE removal:\n%s\n", string(out))
-		} else {
-			fmt.Printf("DEBUG: failed to list live peers before removal: %v\nOutput: %s\n", err, string(out))
-		}
-	}
-
-	// 1) Remove from live session (chatty)
 	{
 		cmd := exec.Command("docker", "exec", wgContainer,
 			"wg", "set", "wg0", "peer", publicKey, "remove")
-		out, err := cmd.CombinedOutput()
-		fmt.Printf("DEBUG: wg remove output:\n%s\n", string(out))
-		if err != nil {
+		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("wg remove peer failed: %v\nOutput: %s", err, string(out))
 		}
 	}
 
-	// 2) Remove from persisted config with diagnostics + backup
 	script := fmt.Sprintf(`
 set -e
-
 CFG="%s"
 PUB="%s"
-TS="$(date +%%s)"
-BAK="${CFG}.bak.${TS}"
 
-# Show occurrences before
-echo "== BEFORE: grep PublicKey with line numbers ==" >&2
-if [ -f "$CFG" ]; then
-  nl -ba "$CFG" | grep -n "PublicKey" || true
-else
-  echo "Config file not found: $CFG" >&2
-fi
-
-# Backup
-cp "$CFG" "$BAK"
-echo "Backup created at: $BAK" >&2
-
-# Remove the peer block containing the exact PublicKey (no assumptions about blank lines)
-# Strategy: buffer each block; if a [Peer] block contains the key, drop it; print everything else.
 awk -v key="$PUB" '
 function flush() {
   if (buf_len > 0) {
@@ -1179,59 +1041,32 @@ BEGIN { buf_len=0; keep=1; inpeer=0 }
 /^\[Peer\]/ { flush(); inpeer=1 } 
 {
   buf[++buf_len]=$0
-  # Detect exact key on a line like: PublicKey = <key> (with arbitrary spaces)
   if ($0 ~ /^[[:space:]]*PublicKey[[:space:]]*=/) {
     line=$0
     sub(/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*/, "", line)
     sub(/[[:space:]]+$/, "", line)
-    if (line == key) { keep=0 }  # mark this block for deletion
+    if (line == key) { keep=0 }
   }
 }
 END { flush() }
 ' "$CFG" > "${CFG}.tmp"
 
 mv "${CFG}.tmp" "$CFG"
-
-# Show occurrences after
-echo "== AFTER: grep PublicKey with line numbers ==" >&2
-nl -ba "$CFG" | grep -n "PublicKey" || true
-
-# Show diff if available
-if command -v diff >/dev/null 2>&1; then
-  echo "== DIFF (backup vs new) ==" >&2
-  diff -u "$BAK" "$CFG" || true
-fi
-
 `, cfgPath, publicKey)
 
 	removeCmd := exec.Command("docker", "exec", wgContainer, "sh", "-c", script)
 	if out, err := removeCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove peer from %s: %v\nOutput:\n%s", cfgPath, err, string(out))
-	} else {
-		fmt.Printf("DEBUG: config update script output:\n%s\n", string(out))
 	}
-
-	// 3) Show live peers after
-	{
-		cmd := exec.Command("docker", "exec", wgContainer, "wg", "show", "wg0", "peers")
-		if out, err := cmd.CombinedOutput(); err == nil {
-			fmt.Printf("DEBUG: live peers AFTER removal:\n%s\n", string(out))
-		} else {
-			fmt.Printf("DEBUG: failed to list live peers after removal: %v\nOutput: %s\n", err, string(out))
-		}
-	}
-
 	return nil
 }
 
-// Ping from inside WireGuard container to the router's internal IP
 func pingFromWireGuard(ip string) error {
 	cmd := exec.Command("docker", "exec", wgContainer, "sh", "-c",
 		fmt.Sprintf("ping -c 1 -W 2 %s >/dev/null 2>&1", ip))
 	return cmd.Run() // nil == success
 }
 
-// Helper for status label used by frontend (Associated/Unassociated/Deactivated)
 func uiStatus(r MikroTikRow) string {
 	if strings.EqualFold(r.Status, "DISABLED") || strings.EqualFold(r.Status, "DEACTIVATED") {
 		return "Deactivated"
@@ -1242,11 +1077,50 @@ func uiStatus(r MikroTikRow) string {
 	return "Unassociated"
 }
 
+func handleMikrotikPreRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireDB(w) {
+		return
+	}
+
+	var req MikroTikRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Duplicate check
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM mikrotik_routers WHERE mac_address = $1)`, req.MAC).Scan(&exists); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "MAC already registered", http.StatusConflict)
+		return
+	}
+
+	data, err := MikroTikPreRegister(req.MAC)
+	if err != nil {
+		http.Error(w, "Pre-registration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(data)
+}
+
 func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	items, err := listRouters()
 	if err != nil {
 		http.Error(w, "DB error: "+err.Error(), http.StatusInternalServerError)
@@ -1269,7 +1143,7 @@ func handleMikrotikList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 type testReq struct {
@@ -1281,6 +1155,10 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req testReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1295,7 +1173,7 @@ func handleMikrotikTest(w http.ResponseWriter, r *http.Request) {
 	err = pingFromWireGuard(rtr.IP)
 	resp := map[string]any{"ok": err == nil}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type macReq struct {
@@ -1307,6 +1185,10 @@ func handleMikrotikDisable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1335,6 +1217,10 @@ func handleMikrotikEnable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1368,6 +1254,10 @@ func handleMikrotikAssociate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req associateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" || req.SiteID == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1386,6 +1276,10 @@ func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only DELETE allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireDB(w) {
+		return
+	}
+
 	var req macReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MAC == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1405,196 +1299,6 @@ func handleMikrotikDelete(w http.ResponseWriter, r *http.Request) {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\main.go =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
-
-package middleware
-
-import (
-	"context"
-	"errors"
-	"net/http"
-	"os"
-	"strings"
-
-	"github.com/golang-jwt/jwt/v5"
-)
-
-type ctxKey string
-
-const (
-	CtxUserID         ctxKey = "user_id"
-	CtxRoleName       ctxKey = "role"
-	CtxRoleID         ctxKey = "role_id"
-	CtxOrganizationID ctxKey = "organization_id"
-)
-
-func JWT(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ah := r.Header.Get("Authorization")
-		if !strings.HasPrefix(ah, "Bearer ") {
-			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
-			return
-		}
-		raw := strings.TrimPrefix(ah, "Bearer ")
-		secret := []byte(os.Getenv("JWT_SECRET"))
-		if len(secret) == 0 {
-			http.Error(w, "JWT secret not configured", http.StatusInternalServerError)
-			return
-		}
-		token, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, errors.New("unexpected signing method")
-			}
-			return secret, nil
-		})
-		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
-		}
-		claims, _ := token.Claims.(jwt.MapClaims)
-		ctx := r.Context()
-		if v, _ := claims["user_id"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxUserID, v)
-		}
-		if v, _ := claims["role"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxRoleName, v)
-		}
-		if v, ok := claims["role_id"].(float64); ok {
-			ctx = context.WithValue(ctx, CtxRoleID, int(v))
-		}
-		if v, _ := claims["organization_id"].(string); v != "" {
-			ctx = context.WithValue(ctx, CtxOrganizationID, v)
-		}
-		next(w, r.WithContext(ctx))
-	}
-}
-
-func GetUserID(r *http.Request) string {
-	if v := r.Context().Value(CtxUserID); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-func GetRoleName(r *http.Request) string {
-	if v := r.Context().Value(CtxRoleName); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-func GetRoleID(r *http.Request) int {
-	if v := r.Context().Value(CtxRoleID); v != nil {
-		return v.(int)
-	}
-	return 0
-}
-func GetOrgID(r *http.Request) string {
-	if v := r.Context().Value(CtxOrganizationID); v != nil {
-		return v.(string)
-	}
-	return ""
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\jwt.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
-
-package middleware
-
-import (
-	"database/sql"
-	"net/http"
-)
-
-// AttachPermissions est un "no-op" middleware ici (perms sont rÃ©solues dans /api/auth/me).
-// On le garde pour compatibilitÃ© avec ton main.go.
-func AttachPermissions(_ *sql.DB) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			next(w, r)
-		}
-	}
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\middleware\permissions.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
-
-package rbac
-
-import (
-	"net/http"
-
-	"netsecure-backend/middleware"
-)
-
-// EnforceOperatorScope est un simple wrapper : les handlers appliquent le filtre
-// (Admin -> tout ; Operator -> org ; User -> 403 sur endpoints admin/op).
-func EnforceOperatorScope(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		role := middleware.GetRoleName(r)
-		if role == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		// Ici on pourrait imposer des headers/contexte supplÃ©mentaires.
-		next(w, r)
-	}
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\rbac\policy.go =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
-
-package wireguard
-
-import (
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
-	"sync/atomic"
-)
-
-var ipCounter uint32 = 10 // start from .10
-
-func GenerateKeyPair() (privateKey, publicKey string, err error) {
-	// âš ï¸ ceci n'est PAS une vraie clÃ© WireGuard, mais OK pour un PoC cÃ´tÃ© FE.
-	priv := make([]byte, 32)
-	if _, err = rand.Read(priv); err != nil {
-		return "", "", err
-	}
-	privateKey = base64.StdEncoding.EncodeToString(priv)
-	publicKey = base64.StdEncoding.EncodeToString(reverseBytes(priv))
-	return privateKey, publicKey, nil
-}
-
-func reverseBytes(b []byte) []byte {
-	n := len(b)
-	out := make([]byte, n)
-	for i := 0; i < n; i++ {
-		out[i] = b[n-1-i]
-	}
-	return out
-}
-
-func ReserveVPNIP() string {
-	n := atomic.AddUint32(&ipCounter, 1)
-	return fmt.Sprintf("10.10.10.%d/32", n%250+5)
-}
-
-func GenerateMikrotikScript(privateKey, ip string) string {
-	return fmt.Sprintf(`# MikroTik WireGuard onboarding script
-/interface wireguard add name=wg0 private-key="%s"
-/ip address add address=%s interface=wg0
-/interface wireguard peers add public-key="SERVER_PUBLIC_KEY" endpoint-address="vpn.example.com" endpoint-port=51820 allowed-address=0.0.0.0/0
-`, privateKey, ip)
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\backend\wireguard\wg.go =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
 <template>
@@ -1611,9 +1315,9 @@ func GenerateMikrotikScript(privateKey, ip string) string {
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import TopNavigation from '@/components/TopNavigation.vue'
-import TopNavigationUser from '@/components/TopNavigationUser.vue'
-import TopNavigationOperator from '@/components/TopNavigationOperator.vue'
+import TopNavigation from '@/components/navigation/TopNavigation.vue'
+import TopNavigationUser from '@/components/navigation/TopNavigationUser.vue'
+import TopNavigationOperator from '@/components/navigation/TopNavigationOperator.vue'
 
 /* ---------- RÃ´le & navigation ---------- */
 const role = ref(localStorage.getItem('role') || '')
@@ -1754,6 +1458,299 @@ body {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\App.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
+// src/frontend/src/appCore.js
+// Fusion de tous les utilitaires, stores, composables, helpers, API
+
+// ---- API base & HTTP helper ----
+export const API = (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') || 'http://localhost:8000';
+const defaultHeaders = { 'Content-Type': 'application/json' };
+export const authHeaders = () => {
+  const t = localStorage.getItem('token');
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+async function http(method, path, body, extraHeaders = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* no json body */ }
+  if (!res.ok) {
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+export const api = {
+  get: (p, h) => http('GET', p, undefined, h),
+  post: (p, b, h) => http('POST', p, b, h),
+  del: (p, b, h) => http('DELETE', p, b, h),
+};
+// ---- Domain APIs ----
+export const authApi = {
+  login: (email, password) => api.post('/api/login', { email, password }),
+  register: (email) => api.post('/api/register', { email }),
+  createUser: (payload) => api.post('/api/users', payload),
+  completeOrganization: (payload) => api.post('/api/complete-organization', payload),
+  async getCurrentUser() {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    const response = await fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!response.ok) throw new Error('Failed to fetch user');
+    return response.json();
+  }
+};
+export const agentsApi = {
+  list: () => api.get('/api/mikrotik/list'),
+  preregister: (mac, siteId = null) => api.post('/api/mikrotik/preregister', siteId ? { mac, site_id: siteId } : { mac }),
+  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),
+  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),
+  remove: (mac) => api.del('/api/mikrotik', { mac }),
+  test: (mac) => api.post('/api/mikrotik/test', { mac }),
+  associate: (mac, siteId) => api.post('/api/mikrotik/associate', { mac, site_id: siteId }),
+  delete: (mac) => api.post('/api/mikrotik/delete', { mac }),
+};
+
+// ---- Auth composable ----
+import { ref, computed } from 'vue';
+export const isAuthenticated = ref(!!localStorage.getItem('token'));
+export function login() { isAuthenticated.value = true; }
+export function logout() {
+  isAuthenticated.value = false;
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  localStorage.removeItem('organization_id');
+  localStorage.removeItem('user_id');
+  window.dispatchEvent(new Event('auth-changed'));
+  window.location.replace('/#/login');
+}
+export function useAuth() {
+  return { isAuthenticated, login, logout };
+}
+
+// ---- Pinia Auth Store ----
+import { defineStore } from 'pinia';
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(localStorage.getItem('token') || '');
+  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'));
+  const isAuthenticatedStore = computed(() => !!token.value);
+  const role = computed(() => user.value?.role || null);
+  function setAuth(newToken, newUser) {
+    token.value = newToken;
+    user.value = newUser;
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  }
+  function logoutStore() {
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+  return { token, user, isAuthenticated: isAuthenticatedStore, role, setAuth, logout: logoutStore };
+});
+
+// ---- Pinia Site Store ----
+export const useSiteStore = defineStore('site', {
+  state: () => ({ sites: [] }),
+  actions: {
+    async fetchSites() {
+      const auth = useAuthStore();
+      let url = '/api/sites';
+      this.sites = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } }).then(r => r.json());
+    }
+  },
+  getters: {
+    filteredSites(state) {
+      const auth = useAuthStore();
+      if (auth.role === 'Administrator') return state.sites;
+      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id);
+      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id));
+      return [];
+    }
+  }
+});
+
+// ---- ACL Helper ----
+export function can(user, needed) {
+  if (!user) return false;
+  const perms = new Set((user.permissions || []).map(String));
+  const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
+  return list.every(p => perms.has(String(p)));
+}
+export default can;
+
+// ---- Particles Utils ----
+let _scriptPromise = null;
+export function loadParticlesScript () {
+  if (typeof window !== 'undefined' && window.particlesJS) {
+    return Promise.resolve();
+  }
+  if (_scriptPromise) return _scriptPromise;
+  _scriptPromise = new Promise((resolve, reject) => {
+    try {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Failed to load particles.js'));
+      document.head.appendChild(s);
+    } catch (e) {
+      console.debug('[particles] creating script tag failed', e);
+      reject(e);
+    }
+  }).catch((e) => {
+    console.debug('[particles] script load failed', e);
+    throw e;
+  });
+  return _scriptPromise;
+}
+export function ensurePJSDom () {
+  try {
+    if (typeof window !== 'undefined' && !window.pJSDom) {
+      window.pJSDom = [];
+    }
+  } catch (e) { console.debug('[particles] ensurePJSDom error', e); }
+}
+export function destroyForId (id) {
+  try {
+    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      try {
+        const inst = list[i];
+        const el = inst?.pJS?.canvas?.el;
+        const hostId = (el && el.parentElement && el.parentElement.id) || inst?.tag?.id || null;
+        if (hostId === id) {
+          const vendors = inst?.pJS?.fn?.vendors;
+          if (vendors?.destroypJS) vendors.destroypJS();
+          if (vendors?.destroy) vendors.destroy();
+          list.splice(i, 1);
+        }
+      } catch (e) { console.debug('[particles] single destroy failed', e); }
+    }
+  } catch (e) { console.debug('[particles] destroyForId failed', e); }
+}
+export function safeRender (id, config) {
+  try {
+    const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+    if (!el) return false;
+    if (typeof window === 'undefined' || !window.particlesJS) return false;
+    destroyForId(id);
+    window.particlesJS(id, config);
+    return true;
+  } catch (e) { console.debug('[particles] render failed', e); return false; }
+}
+export function observeTheme (id, renderFn) {
+  const target = typeof document !== 'undefined' ? document.documentElement : null;
+  if (!target) return () => {};
+  const observer = new MutationObserver(() => {
+    try {
+      destroyForId(id);
+      renderFn?.();
+    } catch (e) { console.debug('[particles] theme change error', e); }
+  });
+  try { observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) { console.debug('[particles] observer start failed', e); }
+  return () => { try { observer.disconnect(); } catch (e) { console.debug('[particles] observer cleanup failed', e); } };
+}
+export function themeIsDark () {
+  try {
+    const t = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null;
+    return t !== 'light';
+  } catch (e) { console.debug('[particles] themeIsDark error', e); return true; }
+}
+export function defaultConfig (isDark = true) {
+  const baseColor = isDark ? '#00c2c2' : '#0ea5a5';
+  const linkColor = isDark ? '#5eead4' : '#14b8a6';
+  const bgColor = isDark ? '#0e111a' : '#f6f8fb';
+  return {
+    particles: {
+      number: { value: 60, density: { enable: true, value_area: 800 } },
+      color: { value: baseColor },
+      shape: { type: 'circle' },
+      opacity: { value: 0.4, random: false },
+      size: { value: 3, random: true },
+      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
+      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
+    },
+    interactivity: {
+      detect_on: 'canvas',
+      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
+    },
+    retina_detect: true,
+    background: { color: bgColor }
+  };
+}
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\appCore.js =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\_legacy\HelloWorld.vue =====
+
+<template>
+  <div class="hello">
+    <h1>{{ msg }}</h1>
+    <p>
+      For a guide and recipes on how to configure / customize this project,<br>
+      check out the
+      <a href="https://cli.vuejs.org" target="_blank" rel="noopener">vue-cli documentation</a>.
+    </p>
+    <h3>Installed CLI Plugins</h3>
+    <ul>
+      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-babel" target="_blank" rel="noopener">babel</a></li>
+      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-eslint" target="_blank" rel="noopener">eslint</a></li>
+    </ul>
+    <h3>Essential Links</h3>
+    <ul>
+      <li><a href="https://vuejs.org" target="_blank" rel="noopener">Core Docs</a></li>
+      <li><a href="https://forum.vuejs.org" target="_blank" rel="noopener">Forum</a></li>
+      <li><a href="https://chat.vuejs.org" target="_blank" rel="noopener">Community Chat</a></li>
+      <li><a href="https://twitter.com/vuejs" target="_blank" rel="noopener">Twitter</a></li>
+      <li><a href="https://news.vuejs.org" target="_blank" rel="noopener">News</a></li>
+    </ul>
+    <h3>Ecosystem</h3>
+    <ul>
+      <li><a href="https://router.vuejs.org" target="_blank" rel="noopener">vue-router</a></li>
+      <li><a href="https://vuex.vuejs.org" target="_blank" rel="noopener">vuex</a></li>
+      <li><a href="https://github.com/vuejs/vue-devtools#vue-devtools" target="_blank" rel="noopener">vue-devtools</a></li>
+      <li><a href="https://vue-loader.vuejs.org" target="_blank" rel="noopener">vue-loader</a></li>
+      <li><a href="https://github.com/vuejs/awesome-vue" target="_blank" rel="noopener">awesome-vue</a></li>
+    </ul>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'HelloWorld',
+  props: {
+    msg: String
+  }
+}
+</script>
+
+<!-- Add "scoped" attribute to limit CSS to this component only -->
+<style scoped>
+h3 {
+  margin: 40px 0 0;
+}
+ul {
+  list-style-type: none;
+  padding: 0;
+}
+li {
+  display: inline-block;
+  margin: 0 10px;
+}
+a {
+  color: #42b983;
+}
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\_legacy\HelloWorld.vue =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddOperatorForm.vue =====
 
 
@@ -1785,7 +1782,7 @@ body {
 
 <script setup>
 import { ref } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 
 const email = ref('')
 const firstName = ref('')
@@ -2038,11 +2035,11 @@ const submitForm = async () => {
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 /* ---------- Champs ---------- */
 const firstName = ref('')
@@ -2305,7 +2302,396 @@ small.hint { color: var(--text-secondary); }
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\AddUserForm.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+<template>
+  <div class="login-page">
+    <!-- Canvas animé -->
+    <div id="login-particles"></div>
+
+    <!-- Formulaire de login -->
+    <div class="login-wrapper">
+      <div class="login-container">
+        <div class="login-card">
+          <h2 class="login-title">NetSecure-IQ</h2>
+          <h3 class="login-subtitle">Login to your account</h3>
+
+          <form @submit.prevent="login" class="login-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <input
+              v-model="password"
+              type="password"
+              placeholder="Password"
+              required
+            />
+            <button :disabled="loading" type="submit">
+              {{ loading ? "Loading..." : "Login" }}
+            </button>
+          </form>
+
+          <p class="login-footer">
+            Don't have an account?
+            <router-link to="/register">Register</router-link>
+          </p>
+
+          <p
+            v-if="message"
+            :class="['login-message', successMessage ? 'success' : 'error']"
+          >
+            {{ message }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const password = ref('')
+const message = ref('')
+const successMessage = ref(false)
+const loading = ref(false)
+const router = useRouter()
+const { login: setAuthLogin } = useAuth()
+
+/* Particles (sécurisé) */
+const ID = 'login-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+/* Auth */
+const login = async () => {
+  loading.value = true
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email.value,
+        password: password.value
+      })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Login failed')
+
+    message.value = 'Login successful! Redirecting...'
+    successMessage.value = true
+
+    // Stockage token & infos
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user_id', data.user_id)
+    localStorage.setItem('role', data.role?.toLowerCase() || '')
+    localStorage.setItem('organization_id', data.organization_id || '')
+
+    // informer l'app qu'on vient de se loguer (maj de la nav)
+    window.dispatchEvent(new Event('auth-changed'))
+
+    // Choix de la redirection
+    let redirectTo = '/dashboard'
+    const role = data.role?.toLowerCase()
+    if (role === 'user') redirectTo = '/routertable'
+    else if (role === 'operator' && !data.organization_id) redirectTo = '/organization/edit'
+
+    if (typeof setAuthLogin === 'function') setAuthLogin()
+    setTimeout(() => router.push(redirectTo), 200)
+  } catch (err) {
+    message.value = 'Error: ' + (err?.message || 'Unknown error')
+    successMessage.value = false
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Page entière */
+.login-page { position: relative; min-height: 100vh; overflow: hidden; }
+
+/* Canvas particles */
+#login-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #login-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.login-wrapper { position: relative; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 32px; min-height: 100vh; }
+
+/* Conteneur */
+.login-container { width: 100%; max-width: 420px; }
+
+/* Carte de login */
+.login-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box;
+}
+
+/* Titres */
+.login-title { text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px; }
+.login-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+/* Form */
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+/* Inputs & bouton full-width */
+.login-form input, .login-form button { width: 100%; box-sizing: border-box; }
+
+/* Input style */
+.login-form input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey);
+  border-radius: 6px; padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s;
+}
+.login-form input::placeholder { color: var(--text-secondary); }
+.login-form input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+/* Bouton */
+.login-form button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: background-color 0.2s;
+}
+.login-form button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+.login-form button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+/* Footer */
+.login-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.login-footer a { color: var(--primary-accent); margin-left: 4px; text-decoration: none; }
+.login-footer a:hover { color: var(--primary-hover); }
+
+/* Messages */
+.login-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.login-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.login-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\LoginForm.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
+<template>
+  <div>
+    <!-- Fond animÃ© derriÃ¨re tout -->
+    <div id="register-particles"></div>
+
+    <!-- Contenu du register -->
+    <div class="register-wrapper">
+      <div class="register-container">
+        <div class="register-card">
+          <h2 class="register-title">NetSecure-IQ</h2>
+          <h3 class="register-subtitle">Create your account</h3>
+
+          <form @submit.prevent="register" class="register-form">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="Email address"
+              required
+            />
+            <button type="submit" :disabled="loading">
+              {{ loading ? "Registering..." : "Register" }}
+            </button>
+          </form>
+
+          <p v-if="message" class="register-message success">{{ message }}</p>
+          <p v-if="error" class="register-message error">{{ error }}</p>
+
+          <p class="register-footer">
+            Already have an account?
+            <router-link to="/login">Login</router-link>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { API } from '@/appCore.js'
+import {
+  ensurePJSDom, loadParticlesScript, defaultConfig,
+  safeRender, observeTheme, destroyForId, themeIsDark
+} from '@/appCore.js'
+
+const email = ref('')
+const message = ref('')
+const error = ref('')
+const loading = ref(false)
+const router = useRouter()
+
+/* Particles */
+const ID = 'register-particles'
+let stopObs = () => {}
+function render() { return safeRender(ID, defaultConfig(themeIsDark())) }
+
+onMounted(async () => {
+  try {
+    await loadParticlesScript()
+  } catch (e) {
+    console.debug('[particles] load failed (non-blocking)', e)
+  }
+  ensurePJSDom()
+  render()
+  stopObs = observeTheme(ID, render)
+})
+onBeforeUnmount(() => {
+  stopObs?.()
+  ensurePJSDom()
+  destroyForId(ID)
+})
+
+const register = async () => {
+  message.value = ''
+  error.value = ''
+  loading.value = true
+
+  try {
+    // âš ï¸ Assure-toi que le backend expose bien POST /api/register.
+    const res = await fetch(`${API}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || data.message || 'Registration failed')
+
+    message.value = data.message || 'Registration successful. Check your email.'
+    email.value = ''
+    setTimeout(() => router.push('/login'), 1500)
+  } catch (err) {
+    error.value = err?.message || 'Registration failed'
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+/* Fond animÃ© */
+#register-particles {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0;
+  background-color: var(--bg-dark); transition: background-color 0.3s ease; pointer-events: none;
+}
+[data-theme='light'] #register-particles { background-color: #f6f8fb; }
+
+/* Wrapper du formulaire */
+.register-wrapper {
+  position: relative; z-index: 10; display: flex; align-items: center; justify-content: center;
+  padding: 32px; min-height: 100vh;
+}
+
+.register-wrapper, .register-wrapper * {
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+.register-container { width: 100%; max-width: 420px; }
+
+.register-card {
+  background-color: var(--panel-grey); border-radius: 12px; padding: 32px;
+  box-shadow: 0 0 40px rgba(0, 194, 194, 0.05); box-sizing: border-box; width: 100%;
+}
+
+.register-title {
+  text-align: center; font-size: 20px; font-weight: 600; color: var(--primary-accent); margin-bottom: 8px;
+}
+
+.register-subtitle { text-align: center; font-size: 16px; margin-bottom: 24px; }
+
+.register-form { display: flex; flex-direction: column; gap: 16px; }
+
+.register-form input, .register-form button { width: 100%; box-sizing: border-box; }
+
+input {
+  background-color: var(--panel-grey); border: 1px solid var(--divider-grey); border-radius: 6px;
+  padding: 12px 14px; font-size: 14px; color: var(--text-primary); transition: border-color 0.2s ease;
+}
+input::placeholder { color: var(--text-secondary); }
+input:focus { outline: none; border-color: var(--primary-accent); background-color: var(--bg-dark); }
+
+button {
+  background-color: var(--primary-accent); color: var(--bg-dark); border: none; border-radius: 6px;
+  font-weight: 600; font-size: 14px; padding: 12px 20px; cursor: pointer; transition: all 0.2s ease;
+}
+button:hover { background-color: var(--primary-hover); color: var(--text-primary); }
+button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
+
+.register-message {
+  margin-top: 16px; font-size: 14px; padding: 10px 12px; border-radius: 6px; text-align: center;
+}
+.register-message.success { background-color: rgba(34, 197, 94, 0.1); color: var(--success); }
+.register-message.error { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+.register-footer { text-align: center; font-size: 13px; margin-top: 16px; color: var(--text-secondary); }
+.register-footer a { color: var(--primary-accent); text-decoration: none; margin-left: 4px; }
+.register-footer a:hover { color: var(--primary-hover); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\auth\RegisterForm.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\BackgroundParticles.vue =====
 
 <template>
   <div id="bg-particles" class="particles-layer"></div>
@@ -2316,7 +2702,7 @@ import { onMounted, onUnmounted } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'bg-particles'
 let stopObs = () => {}
@@ -2356,9 +2742,9 @@ onUnmounted(() => {
 </style>
 
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\BackgroundParticles.vue =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\BackgroundParticles.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\charts\LineChart.vue =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\LineChart.vue =====
 
 <template>
   <div class="chart-root">
@@ -2429,7 +2815,7 @@ canvas {
 </style>
 
 
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\charts\LineChart.vue =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\common\LineChart.vue =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardOperator.vue =====
 
@@ -2609,8 +2995,8 @@ canvas {
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import LineChart from '@/components/charts/LineChart.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
+import LineChart from '@/components/common/LineChart.vue'
 
 const router = useRouter()
 const go = (p) => router.push(p)
@@ -2955,7 +3341,7 @@ onUnmounted(() => { if (iv) clearInterval(iv) })
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
 import { computed, ref } from 'vue'
 
 const orgId = ref(localStorage.getItem('organization_id') || '')
@@ -3039,70 +3425,6 @@ const orgEmail = computed(() => orgProfile.value?.contact_email)
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\DashboardPage.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HelloWorld.vue =====
-
-<template>
-  <div class="hello">
-    <h1>{{ msg }}</h1>
-    <p>
-      For a guide and recipes on how to configure / customize this project,<br>
-      check out the
-      <a href="https://cli.vuejs.org" target="_blank" rel="noopener">vue-cli documentation</a>.
-    </p>
-    <h3>Installed CLI Plugins</h3>
-    <ul>
-      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-babel" target="_blank" rel="noopener">babel</a></li>
-      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-eslint" target="_blank" rel="noopener">eslint</a></li>
-    </ul>
-    <h3>Essential Links</h3>
-    <ul>
-      <li><a href="https://vuejs.org" target="_blank" rel="noopener">Core Docs</a></li>
-      <li><a href="https://forum.vuejs.org" target="_blank" rel="noopener">Forum</a></li>
-      <li><a href="https://chat.vuejs.org" target="_blank" rel="noopener">Community Chat</a></li>
-      <li><a href="https://twitter.com/vuejs" target="_blank" rel="noopener">Twitter</a></li>
-      <li><a href="https://news.vuejs.org" target="_blank" rel="noopener">News</a></li>
-    </ul>
-    <h3>Ecosystem</h3>
-    <ul>
-      <li><a href="https://router.vuejs.org" target="_blank" rel="noopener">vue-router</a></li>
-      <li><a href="https://vuex.vuejs.org" target="_blank" rel="noopener">vuex</a></li>
-      <li><a href="https://github.com/vuejs/vue-devtools#vue-devtools" target="_blank" rel="noopener">vue-devtools</a></li>
-      <li><a href="https://vue-loader.vuejs.org" target="_blank" rel="noopener">vue-loader</a></li>
-      <li><a href="https://github.com/vuejs/awesome-vue" target="_blank" rel="noopener">awesome-vue</a></li>
-    </ul>
-  </div>
-</template>
-
-<script>
-export default {
-  name: 'HelloWorld',
-  props: {
-    msg: String
-  }
-}
-</script>
-
-<!-- Add "scoped" attribute to limit CSS to this component only -->
-<style scoped>
-h3 {
-  margin: 40px 0 0;
-}
-ul {
-  list-style-type: none;
-  padding: 0;
-}
-li {
-  display: inline-block;
-  margin: 0 10px;
-}
-a {
-  color: #42b983;
-}
-</style>
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HelloWorld.vue =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\HomePage.vue =====
 
 <template>
@@ -3128,7 +3450,7 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const ID = 'home-particles'
 let stopObs = () => {}
@@ -3319,12 +3641,12 @@ onBeforeUnmount(() => {
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuth } from '../composables/useAuth'
-import { API } from '@/utils/api.js'
+import { useAuth } from '@/appCore.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')
@@ -3478,6 +3800,536 @@ const login = async () => {
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\LoginForm.vue =====
 
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
+
+<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + nav links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <!-- Not authenticated -->
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (ADMIN) -->
+      <template v-else>
+        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+        <router-link to="/organization" class="nav-link" :class="{ active: $route.path === '/organization' }">Organization</router-link>
+        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
+        <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
+        <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
+        <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
+        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
+          Agent Pre-Registration
+        </router-link>
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: role badge + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as administrator">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Admin signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Light / Dark theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Left */
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand {
+  font-weight: bold; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+}
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigation.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationOperator.vue =====
+
+<!-- src/frontend/src/components/TopNavigationOperator.vue -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <!-- Not authenticated -->
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (OPERATOR) -->
+      <template v-else>
+        <router-link
+          to="/dashboard-operator"
+          class="nav-link"
+          :class="{ active: $route.path === '/dashboard-operator' }"
+        >Dashboard</router-link>
+
+        <router-link
+          to="/routertable"
+          class="nav-link"
+          :class="{ active: $route.path === '/routertable' }"
+        >RouterTable</router-link>
+
+        <router-link
+          to="/organization"
+          class="nav-link"
+          :class="{ active: $route.path === '/organization' }"
+        >Organization</router-link>
+
+        <!-- Add User only if attached to an organization -->
+        <router-link
+          v-if="hasOrganization"
+          to="/adduser"
+          class="nav-link"
+          :class="{ active: $route.path === '/adduser' }"
+        >Add User</router-link>
+
+        <!-- Agents & Pre-registration visible only if org -->
+        <router-link
+          v-if="hasOrganization"
+          to="/agents"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents' }"
+        >Agents</router-link>
+
+        <router-link
+          v-if="hasOrganization"
+          to="/agents/register"
+          class="nav-link"
+          :class="{ active: $route.path === '/agents/register' }"
+        >Agent Pre-Registration</router-link>
+
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: status + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as operator">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">Operator signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">??</span>
+        <span v-else>??</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar { background-color: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+
+/* Left */
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand { font-weight: bold; font-size: 18px; color: var(--primary-accent); text-decoration: none; }
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationOperator.vue =====
+
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationUser.vue =====
+
+<!-- src/frontend/src/components/TopNavigationUser.vue -->
+<template>
+  <nav class="navbar">
+    <!-- Left: brand + links -->
+    <div class="nav-left">
+      <router-link to="/" class="brand">NetSecure-IQ</router-link>
+      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+
+      <template v-if="!isAuthenticated">
+        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
+        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
+      </template>
+
+      <!-- Authenticated (USER) -->
+      <template v-else>
+        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
+        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
+        <button @click="logout" class="nav-link">Logout</button>
+      </template>
+    </div>
+
+    <!-- Right: status + theme toggle -->
+    <div class="nav-right">
+      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as user">
+        <span class="dot online" aria-hidden="true"></span>
+        <span class="role-text">User signed in</span>
+        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
+      </div>
+
+      <button
+        class="theme-toggle"
+        @click="toggleTheme"
+        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <span v-if="isDark">â˜€ï¸</span>
+        <span v-else>ðŸŒ™</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<script setup>
+import { useAuth } from '@/appCore.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const { isAuthenticated, logout } = useAuth()
+
+/** Organization: reactive via localStorage + events */
+const organizationId = ref(localStorage.getItem('organization_id') || '')
+const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
+function syncOrgId() {
+  organizationId.value = localStorage.getItem('organization_id') || ''
+}
+
+/** Theme */
+const theme = ref(localStorage.getItem('theme') || 'dark')
+const isDark = computed(() => theme.value === 'dark')
+function toggleTheme() {
+  theme.value = isDark.value ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('theme', theme.value)
+}
+
+onMounted(() => {
+  document.documentElement.setAttribute('data-theme', theme.value)
+  window.addEventListener('storage', syncOrgId)
+  window.addEventListener('auth-changed', syncOrgId)
+})
+onUnmounted(() => {
+  window.removeEventListener('storage', syncOrgId)
+  window.removeEventListener('auth-changed', syncOrgId)
+})
+</script>
+
+<style scoped>
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00b4aa;
+  --primary-hover: #008a8a;
+  --success: #22c55e;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 64px;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--divider-grey);
+  transition: background-color 0.3s ease;
+}
+[data-theme='light'] .navbar {
+  background-color: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.brand {
+  font-weight: 700; font-size: 18px;
+  color: var(--primary-accent);
+  text-decoration: none;
+}
+.brand:hover { color: var(--primary-hover); }
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: var(--primary-accent);
+  background-color: rgba(0,194,194,0.1);
+}
+.nav-link.active { font-weight: 600; }
+
+/* Right */
+.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
+
+.role-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--text-primary); font-size: 12px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.online { background: var(--success); }
+.role-text { font-weight: 600; }
+.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.theme-toggle {
+  background: none; border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem; padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+.theme-toggle:hover {
+  background-color: var(--divider-grey);
+  color: var(--text-primary);
+}
+[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
+</style>
+
+
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\navigation\TopNavigationUser.vue =====
+
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\organization\OrganizationProfile.vue =====
 
 
@@ -3571,7 +4423,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const CONTAINER_ID = 'org-particles'
 let stopObs = () => {}
@@ -3788,11 +4640,11 @@ span{ font-size:14px; color:var(--text-primary); }
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const router = useRouter()
 const message = ref('')
@@ -4089,11 +4941,11 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark
-} from '@/utils/particles.js'
+} from '@/appCore.js'
 
 const email = ref('')
 const message = ref('')
@@ -4251,6 +5103,8 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
                 <tr>
                   <th>MAC Address</th>
                   <th>Status</th>
+                  <th>Organization</th>
+                  <th>Site</th>
                   <th>Last Contact</th>
                 </tr>
               </thead>
@@ -4258,7 +5112,11 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
                 <tr v-for="r in routers" :key="r.mac">
                   <td class="mono">{{ r.mac }}</td>
                   <td><span :class="['state', stateClass(r.status)]">{{ label(r.status) }}</span></td>
-                  <td>{{ formatDate(r.time) }}</td>
+                  <td>{{ r.organization }}</td>
+                  <td>{{ r.site }}</td>
+                  <td :title="new Date(r.time).toLocaleString()">
+                    {{ formatRelativeTime(r.time) }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -4275,18 +5133,25 @@ button:disabled { background-color: #2f333d; color: #666; cursor: not-allowed; }
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
 import { ref, onMounted } from 'vue'
 
 const routers = ref([])
 const loading = ref(false)
 const error = ref('')
 
-function normalize(entry) {
+function normalize(router) {
+  // VÃ©rifier si le routeur est en ligne (dernier contact < 5 minutes)
+  const lastSeen = new Date(router.last_seen || router.time || new Date().toISOString())
+  const minutesSinceLastSeen = (new Date() - lastSeen) / (1000 * 60)
+  const isOnline = minutesSinceLastSeen < 5
+  
   return {
-    mac: entry.mac || entry.mac_address || entry.MAC || 'â€”',
-    status: (entry.status || entry.value || 'unknown').toString().toLowerCase(),
-    time: entry.time || entry.lastSeen || entry.timestamp || new Date().toISOString()
+    mac: router.mac || 'â€”',
+    status: isOnline ? 'online' : 'offline',
+    time: router.last_seen || router.time || new Date().toISOString(),
+    organization: router.organization || 'â€”',
+    site: router.site || 'â€”',
+    site_id: router.site_id || null
   }
 }
 function label(s) {
@@ -4299,27 +5164,61 @@ function formatDate(iso) {
   try { return new Date(iso).toLocaleString() } catch { return 'â€”' }
 }
 
+function formatRelativeTime(dateString) {
+  try {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffInSeconds = Math.floor((now - date) / 1000)
+    
+    if (diffInSeconds < 60) return 'Just now'
+    
+    const diffInMinutes = Math.floor(diffInSeconds / 60)
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`
+    
+    const diffInHours = Math.floor(diffInMinutes / 60)
+    if (diffInHours < 24) return `${diffInHours}h ago`
+    
+    const diffInDays = Math.floor(diffInHours / 24)
+    if (diffInDays < 30) return `${diffInDays}d ago`
+    
+    return date.toLocaleDateString()
+  } catch {
+    return 'â€”'
+  }
+}
+
 async function loadRouters() {
   loading.value = true
   error.value = ''
   try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`${API}/api/data/routers`, {
-      headers: { 'Accept': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-    }).catch(() => null)
-
-    if (!res || !res.ok) throw new Error('Showing demo data (API unavailable).')
-    const raw = await res.json()
-    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
-    routers.value = list.map(normalize)
+    const API_BASE_URL = 'http://localhost:8000/api'
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch routers')
+    
+    const data = await response.json()
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid response format')
+    }
+    
+    // Trier par statut (en ligne d'abord) puis par date de dernier contact
+    routers.value = data
+      .map(normalize)
+      .sort((a, b) => {
+        if (a.status === b.status) {
+          return new Date(b.time) - new Date(a.time)
+        }
+        return a.status === 'online' ? -1 : 1
+      })
+    
   } catch (e) {
-    // Demo data for display
-    routers.value = [
-      { mac: 'E4:8D:8C:AA:01:11', status: 'online',  time: new Date().toISOString() },
-      { mac: '58:EF:68:02:7C:22', status: 'offline', time: new Date(Date.now() - 3600e3).toISOString() },
-      { mac: 'C0:56:27:9A:33:44', status: 'unknown', time: new Date(Date.now() - 6*3600e3).toISOString() }
-    ]
-    error.value = e.message || 'Unknown error.'
+    console.error('Failed to load routers:', e)
+    error.value = 'Failed to load router data. Please try again.'
+    // Garder les donnÃ©es existantes en cas d'erreur
+    if (!routers.value.length) {
+      routers.value = [
+        { mac: 'E4:8D:8C:AA:01:11', status: 'offline', time: new Date().toISOString() },
+      ]
+    }
   } finally {
     loading.value = false
   }
@@ -4390,600 +5289,12 @@ onMounted(loadRouters)
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\RouterTable.vue =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigation.vue =====
+===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
-<!-- src/frontend/src/components/TopNavigation.vue (Admin) -->
-<template>
-  <nav class="navbar">
-    <!-- Left: brand + nav links -->
-    <div class="nav-left">
-      <router-link to="/" class="brand">NetSecure-IQ</router-link>
-      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
+// src/frontend/src/core/index.js// Regroupe: utils/api.js, utils/authApi.js, utils/agentsApi.js,// composables/useAuth.js, stores/authStore.js, stores/siteStore.js,// helpers/acl.js, utils/particles.js// -------------------------------// API base & HTTP helper// -------------------------------export const API =  (import.meta?.env?.VITE_API_BASE || '').replace(/\/+$/, '') ||  'http://localhost:8000';const defaultHeaders = { 'Content-Type': 'application/json' };export const authHeaders = () => {  const t = localStorage.getItem('token');  return t ? { Authorization: `Bearer ${t}` } : {};};async function http(method, path, body, extraHeaders = {}) {  const res = await fetch(`${API}${path}`, {    method,    headers: { ...defaultHeaders, ...authHeaders(), ...extraHeaders },    body: body != null ? JSON.stringify(body) : undefined,  });  let data = null;  try { data = await res.json(); } catch { /* no json body */ }  if (!res.ok) {    const msg = data?.error || data?.message || `HTTP ${res.status}`;    throw new Error(msg);  }  return data;}export const api = {  get: (p, h) => http('GET', p, undefined, h),  post: (p, b, h) => http('POST', p, b, h),  del: (p, b, h) => http('DELETE', p, b, h),};// -------------------------------// Domain APIs (auth / users / agents)// -------------------------------export const authApi = {  login: (email, password) => api.post('/api/login', { email, password }),  register: (email) => api.post('/api/register', { email }),  createUser: (payload) => api.post('/api/users', payload),  completeOrganization: (payload) =>    api.post('/api/complete-organization', payload),};export const agentsApi = {  list: () => api.get('/api/mikrotik/list'),  preregister: (mac) => api.post('/api/mikrotik/preregister', { mac }),  enable: (mac) => api.post('/api/mikrotik/enable', { mac }),  disable: (mac) => api.post('/api/mikrotik/disable', { mac }),  remove: (mac) => api.del('/api/mikrotik', { mac }),  test: (mac) => api.post('/api/mikrotik/test', { mac }),  associate: (mac, site_id) => api.post('/api/mikrotik/associate', { mac, site_id }),};// -------------------------------// Minimal ACL helper// -------------------------------export const acl = {  can(role, allowed) {    const r = (role || '').toLowerCase();    const list = Array.isArray(allowed) ? allowed : [allowed];    return list.map(String).map(s => s.toLowerCase()).includes(r);  }};// -------------------------------// Global auth/site state + composable// (remplace stores/* + composables/useAuth.js)// -------------------------------import { reactive, computed } from 'vue';const _auth = reactive({  token: localStorage.getItem('token') || '',  role: (localStorage.getItem('role') || '').toLowerCase(),  user_id: localStorage.getItem('user_id') || '',  organization_id: localStorage.getItem('organization_id') || '',});const _site = reactive({  organization_id: localStorage.getItem('organization_id') || '',});function syncAuthToLocal(data = {}) {  if ('token' in data) localStorage.setItem('token', data.token || '');  if ('user_id' in data) localStorage.setItem('user_id', data.user_id || '');  if ('role' in data) localStorage.setItem('role', (data.role || '').toLowerCase());  if ('organization_id' in data) localStorage.setItem('organization_id', data.organization_id || '');}export function useAuth() {  const isLoggedIn = computed(() => !!_auth.token);  async function login(email, password) {    const data = await authApi.login(email, password);    Object.assign(_auth, {      token: data.token || '',      role: (data.role || '').toLowerCase(),      user_id: data.user_id || '',      organization_id: data.organization_id || '',    });    syncAuthToLocal(_auth);    _site.organization_id = _auth.organization_id;    window.dispatchEvent(new Event('auth-changed'));    return data;  }  function logout() {    Object.assign(_auth, { token: '', role: '', user_id: '', organization_id: '' });    syncAuthToLocal(_auth);    _site.organization_id = '';    window.dispatchEvent(new Event('auth-changed'));  }  return { state: _auth, isLoggedIn, login, logout };}export const authStore = {  state: _auth,  setOrganization(id) {    _auth.organization_id = id || '';    _site.organization_id = _auth.organization_id;    localStorage.setItem('organization_id', _auth.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};export const siteStore = {  state: _site,  setOrganization(id) {    _site.organization_id = id || '';    localStorage.setItem('organization_id', _site.organization_id);    window.dispatchEvent(new Event('auth-changed'));  }};// -------------------------------// Particles utilities (remplace utils/particles.js)// -------------------------------export function ensurePJSDom() {  if (!window.pJSDom) window.pJSDom = [];  return window.pJSDom;}export function themeIsDark() {  // dÃ©faut: dark si pas explicitement 'light'  return document.documentElement.getAttribute('data-theme') !== 'light';}export function defaultConfig(isDark = true) {  const color = isDark ? '#00c2c2' : '#0ea5a5';  const linkColor = isDark ? '#22d3ee' : '#0ea5a5';  return {    particles: {      number: { value: 40, density: { enable: true, value_area: 800 } },      color: { value: color },      shape: { type: 'circle' },      opacity: { value: 0.2 },      size: { value: 3, random: true },      line_linked: { enable: true, distance: 150, color: linkColor, opacity: 0.2, width: 1 },      move: { enable: true, speed: 2, out_mode: 'out' }    },    interactivity: {      detect_on: 'canvas',      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }    },    retina_detect: true  };}export function loadParticlesScript() {  return new Promise((resolve, reject) => {    if (window.particlesJS) return resolve();    const id = 'particlesjs-cdn';    if (document.getElementById(id)) {      document.getElementById(id).addEventListener('load', resolve, { once: true });      return;    }    const s = document.createElement('script');    s.id = id;    s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js';    s.async = true;    s.onload = () => resolve();    s.onerror = (e) => reject(e);    document.head.appendChild(s);  });}export function destroyForId(containerId) {  try {    const list = ensurePJSDom();    for (let i = list.length - 1; i >= 0; i--) {      const inst = list[i];      const el = inst?.pJS?.canvas?.el?.parentNode || inst?.pJS?.canvas?.el;      if (!el) continue;      const same = (el.id === containerId);      if (same) {        // compat des versions        if (inst?.pJS?.fn?.vendors?.destroy) inst.pJS.fn.vendors.destroy();        if (inst?.pJS?.fn?.vendors?.destroypJS) inst.pJS.fn.vendors.destroypJS();        list.splice(i, 1);      }    }  } catch { /* ignore */ }}export function safeRender(containerId, config) {  if (!window.particlesJS || !document.getElementById(containerId)) return false;  destroyForId(containerId);  try {    window.particlesJS(containerId, config);    return true;  } catch {    return false;  }}export function observeTheme(containerId, renderFn) {  const mo = new MutationObserver(() => { renderFn(); });  mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });  const onStorage = () => renderFn();  window.addEventListener('storage', onStorage);  return () => { mo.disconnect(); window.removeEventListener('storage', onStorage); };}
 
-      <!-- Not authenticated -->
-      <template v-if="!isAuthenticated">
-        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
-        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
-      </template>
 
-      <!-- Authenticated (ADMIN) -->
-      <template v-else>
-        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
-        <router-link to="/organization" class="nav-link" :class="{ active: $route.path === '/organization' }">Organization</router-link>
-        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
-        <router-link to="/adduser" class="nav-link" :class="{ active: $route.path === '/adduser' }">Add User</router-link>
-        <router-link to="/addoperator" class="nav-link" :class="{ active: $route.path === '/addoperator' }">Add Operator</router-link>
-        <router-link to="/agents" class="nav-link" :class="{ active: $route.path === '/agents' }">Agents</router-link>
-        <router-link to="/agents/register" class="nav-link" :class="{ active: $route.path === '/agents/register' }">
-          Agent Pre-Registration
-        </router-link>
-        <button @click="logout" class="nav-link">Logout</button>
-      </template>
-    </div>
-
-    <!-- Right: role badge + theme toggle -->
-    <div class="nav-right">
-      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as administrator">
-        <span class="dot online" aria-hidden="true"></span>
-        <span class="role-text">Admin signed in</span>
-        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
-      </div>
-
-      <button
-        class="theme-toggle"
-        @click="toggleTheme"
-        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
-      </button>
-    </div>
-  </nav>
-</template>
-
-<script setup>
-import { useAuth } from '@/composables/useAuth.js'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-
-const { isAuthenticated, logout } = useAuth()
-
-/** Organization: reactive via localStorage + events */
-const organizationId = ref(localStorage.getItem('organization_id') || '')
-const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
-function syncOrgId() {
-  organizationId.value = localStorage.getItem('organization_id') || ''
-}
-
-/** Light / Dark theme */
-const theme = ref(localStorage.getItem('theme') || 'dark')
-const isDark = computed(() => theme.value === 'dark')
-function toggleTheme() {
-  theme.value = isDark.value ? 'light' : 'dark'
-  document.documentElement.setAttribute('data-theme', theme.value)
-  localStorage.setItem('theme', theme.value)
-}
-
-onMounted(() => {
-  document.documentElement.setAttribute('data-theme', theme.value)
-  window.addEventListener('storage', syncOrgId)
-  window.addEventListener('auth-changed', syncOrgId)
-})
-onUnmounted(() => {
-  window.removeEventListener('storage', syncOrgId)
-  window.removeEventListener('auth-changed', syncOrgId)
-})
-</script>
-
-<style scoped>
-:root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00b4aa;
-  --primary-hover: #008a8a;
-  --success: #22c55e;
-}
-
-/* Navbar */
-.navbar {
-  position: fixed; top: 0; left: 0; right: 0;
-  z-index: 1000;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px; height: 64px;
-  background-color: var(--bg-dark);
-  border-bottom: 1px solid var(--divider-grey);
-  transition: background-color 0.3s ease;
-}
-[data-theme='light'] .navbar {
-  background-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-/* Left */
-.nav-left { display: flex; align-items: center; gap: 24px; }
-.brand {
-  font-weight: bold; font-size: 18px;
-  color: var(--primary-accent);
-  text-decoration: none;
-}
-.brand:hover { color: var(--primary-hover); }
-
-.nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-.nav-link:hover,
-.nav-link.active {
-  color: var(--primary-accent);
-  background-color: rgba(0,194,194,0.1);
-}
-.nav-link.active { font-weight: 600; }
-
-/* Right */
-.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
-
-.role-badge {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-  color: var(--text-primary); font-size: 12px;
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.online { background: var(--success); }
-.role-text { font-weight: 600; }
-.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-.theme-toggle {
-  background: none; border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.25rem; padding: 8px;
-  border-radius: 50%;
-  transition: background-color 0.2s ease;
-}
-.theme-toggle:hover {
-  background-color: var(--divider-grey);
-  color: var(--text-primary);
-}
-[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
-</style>
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigation.vue =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
-
-<!-- src/frontend/src/components/TopNavigationOperator.vue -->
-<template>
-  <nav class="navbar">
-    <!-- Left: brand + links -->
-    <div class="nav-left">
-      <router-link to="/" class="brand">NetSecure-IQ</router-link>
-      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
-
-      <!-- Not authenticated -->
-      <template v-if="!isAuthenticated">
-        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
-        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
-      </template>
-
-      <!-- Authenticated (OPERATOR) -->
-      <template v-else>
-        <router-link
-          to="/dashboard-operator"
-          class="nav-link"
-          :class="{ active: $route.path === '/dashboard-operator' }"
-        >Dashboard</router-link>
-
-        <router-link
-          to="/routertable"
-          class="nav-link"
-          :class="{ active: $route.path === '/routertable' }"
-        >RouterTable</router-link>
-
-        <router-link
-          to="/organization"
-          class="nav-link"
-          :class="{ active: $route.path === '/organization' }"
-        >Organization</router-link>
-
-        <!-- Add User only if attached to an organization -->
-        <router-link
-          v-if="hasOrganization"
-          to="/adduser"
-          class="nav-link"
-          :class="{ active: $route.path === '/adduser' }"
-        >Add User</router-link>
-
-        <!-- Agents & Pre-registration visible only if org -->
-        <router-link
-          v-if="hasOrganization"
-          to="/agents"
-          class="nav-link"
-          :class="{ active: $route.path === '/agents' }"
-        >Agents</router-link>
-
-        <router-link
-          v-if="hasOrganization"
-          to="/agents/register"
-          class="nav-link"
-          :class="{ active: $route.path === '/agents/register' }"
-        >Agent Pre-Registration</router-link>
-
-        <button @click="logout" class="nav-link">Logout</button>
-      </template>
-    </div>
-
-    <!-- Right: status + theme toggle -->
-    <div class="nav-right">
-      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as operator">
-        <span class="dot online" aria-hidden="true"></span>
-        <span class="role-text">Operator signed in</span>
-        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
-      </div>
-
-      <button
-        class="theme-toggle"
-        @click="toggleTheme"
-        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
-        <span v-if="isDark">☀️</span>
-        <span v-else>🌙</span>
-      </button>
-    </div>
-  </nav>
-</template>
-
-<script setup>
-import { useAuth } from '@/composables/useAuth.js'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-
-const { isAuthenticated, logout } = useAuth()
-
-/** Organization: reactive via localStorage + events */
-const organizationId = ref(localStorage.getItem('organization_id') || '')
-const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
-function syncOrgId() {
-  organizationId.value = localStorage.getItem('organization_id') || ''
-}
-
-/** Theme */
-const theme = ref(localStorage.getItem('theme') || 'dark')
-const isDark = computed(() => theme.value === 'dark')
-function toggleTheme() {
-  theme.value = isDark.value ? 'light' : 'dark'
-  document.documentElement.setAttribute('data-theme', theme.value)
-  localStorage.setItem('theme', theme.value)
-}
-
-onMounted(() => {
-  document.documentElement.setAttribute('data-theme', theme.value)
-  window.addEventListener('storage', syncOrgId)
-  window.addEventListener('auth-changed', syncOrgId)
-})
-onUnmounted(() => {
-  window.removeEventListener('storage', syncOrgId)
-  window.removeEventListener('auth-changed', syncOrgId)
-})
-</script>
-
-<style scoped>
-:root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00b4aa;
-  --primary-hover: #008a8a;
-  --success: #22c55e;
-}
-
-/* Navbar */
-.navbar {
-  position: fixed; top: 0; left: 0; right: 0;
-  z-index: 1000;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px; height: 64px;
-  background-color: var(--bg-dark);
-  border-bottom: 1px solid var(--divider-grey);
-  transition: background-color 0.3s ease;
-}
-[data-theme='light'] .navbar { background-color: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-
-/* Left */
-.nav-left { display: flex; align-items: center; gap: 24px; }
-.brand { font-weight: bold; font-size: 18px; color: var(--primary-accent); text-decoration: none; }
-.brand:hover { color: var(--primary-hover); }
-
-.nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-.nav-link:hover,
-.nav-link.active {
-  color: var(--primary-accent);
-  background-color: rgba(0,194,194,0.1);
-}
-.nav-link.active { font-weight: 600; }
-
-/* Right */
-.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
-
-.role-badge {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-  color: var(--text-primary); font-size: 12px;
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.online { background: var(--success); }
-.role-text { font-weight: 600; }
-.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-/* Theme toggle */
-.theme-toggle {
-  background: none; border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.25rem; padding: 8px;
-  border-radius: 50%;
-  transition: background-color 0.2s ease;
-}
-.theme-toggle:hover {
-  background-color: var(--divider-grey);
-  color: var(--text-primary);
-}
-[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
-</style>
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationOperator.vue =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
-
-<!-- src/frontend/src/components/TopNavigationUser.vue -->
-<template>
-  <nav class="navbar">
-    <!-- Left: brand + links -->
-    <div class="nav-left">
-      <router-link to="/" class="brand">NetSecure-IQ</router-link>
-      <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">Home</router-link>
-
-      <template v-if="!isAuthenticated">
-        <router-link to="/login" class="nav-link" :class="{ active: $route.path === '/login' }">Login</router-link>
-        <router-link to="/register" class="nav-link" :class="{ active: $route.path === '/register' }">Register</router-link>
-      </template>
-
-      <!-- Authenticated (USER) -->
-      <template v-else>
-        <router-link to="/dashboard" class="nav-link" :class="{ active: $route.path === '/dashboard' }">Dashboard</router-link>
-        <router-link to="/routertable" class="nav-link" :class="{ active: $route.path === '/routertable' }">RouterTable</router-link>
-        <button @click="logout" class="nav-link">Logout</button>
-      </template>
-    </div>
-
-    <!-- Right: status + theme toggle -->
-    <div class="nav-right">
-      <div v-if="isAuthenticated" class="role-badge" title="You are signed in as user">
-        <span class="dot online" aria-hidden="true"></span>
-        <span class="role-text">User signed in</span>
-        <span v-if="hasOrganization" class="org-hint">org: {{ organizationId }}</span>
-      </div>
-
-      <button
-        class="theme-toggle"
-        @click="toggleTheme"
-        :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
-        <span v-if="isDark">â˜€ï¸</span>
-        <span v-else>ðŸŒ™</span>
-      </button>
-    </div>
-  </nav>
-</template>
-
-<script setup>
-import { useAuth } from '@/composables/useAuth.js'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-
-const { isAuthenticated, logout } = useAuth()
-
-/** Organization: reactive via localStorage + events */
-const organizationId = ref(localStorage.getItem('organization_id') || '')
-const hasOrganization = computed(() => !!(organizationId.value && String(organizationId.value).trim()))
-function syncOrgId() {
-  organizationId.value = localStorage.getItem('organization_id') || ''
-}
-
-/** Theme */
-const theme = ref(localStorage.getItem('theme') || 'dark')
-const isDark = computed(() => theme.value === 'dark')
-function toggleTheme() {
-  theme.value = isDark.value ? 'light' : 'dark'
-  document.documentElement.setAttribute('data-theme', theme.value)
-  localStorage.setItem('theme', theme.value)
-}
-
-onMounted(() => {
-  document.documentElement.setAttribute('data-theme', theme.value)
-  window.addEventListener('storage', syncOrgId)
-  window.addEventListener('auth-changed', syncOrgId)
-})
-onUnmounted(() => {
-  window.removeEventListener('storage', syncOrgId)
-  window.removeEventListener('auth-changed', syncOrgId)
-})
-</script>
-
-<style scoped>
-:root {
-  --bg-dark: #0e111a;
-  --panel-grey: #1a1d26;
-  --divider-grey: #2a2d36;
-  --text-primary: #f5f7fa;
-  --text-secondary: #9ca3af;
-  --primary-accent: #00b4aa;
-  --primary-hover: #008a8a;
-  --success: #22c55e;
-}
-
-/* Navbar */
-.navbar {
-  position: fixed; top: 0; left: 0; right: 0;
-  z-index: 1000;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 32px; height: 64px;
-  background-color: var(--bg-dark);
-  border-bottom: 1px solid var(--divider-grey);
-  transition: background-color 0.3s ease;
-}
-[data-theme='light'] .navbar {
-  background-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.nav-left { display: flex; align-items: center; gap: 24px; }
-.brand {
-  font-weight: 700; font-size: 18px;
-  color: var(--primary-accent);
-  text-decoration: none;
-}
-.brand:hover { color: var(--primary-hover); }
-
-.nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-.nav-link:hover,
-.nav-link.active {
-  color: var(--primary-accent);
-  background-color: rgba(0,194,194,0.1);
-}
-.nav-link.active { font-weight: 600; }
-
-/* Right */
-.nav-right { margin-left: auto; display:flex; align-items:center; gap:12px; }
-
-.role-badge {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-  color: var(--text-primary); font-size: 12px;
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.online { background: var(--success); }
-.role-text { font-weight: 600; }
-.org-hint { opacity: .75; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-.theme-toggle {
-  background: none; border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.25rem; padding: 8px;
-  border-radius: 50%;
-  transition: background-color 0.2s ease;
-}
-.theme-toggle:hover {
-  background-color: var(--divider-grey);
-  color: var(--text-primary);
-}
-[data-theme='light'] .theme-toggle:hover { background-color: rgba(0,0,0,0.05); }
-</style>
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\components\TopNavigationUser.vue =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
-
-import { ref } from 'vue';
-
-const isAuthenticated = ref(false);
-
-function login() {
-  isAuthenticated.value = true;
-}
-
-function logout() {
-  isAuthenticated.value = false;
-  localStorage.removeItem('token');
-  localStorage.removeItem('role');
-  localStorage.removeItem('organization_id');
-  localStorage.removeItem('user_id');
-  window.dispatchEvent(new Event('auth-changed'));
-  // redirection propre
-  window.location.replace('/#/login');
-}
-
-export function useAuth() {
-  return { isAuthenticated, login, logout };
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-import { ref, computed } from 'vue';
-
-const user = ref<{ email: string } | null>(null);
-
-export function useAuth() {
-  function login(email: string) {
-    user.value = { email };
-  }
-  function logout() {
-    user.value = null;
-  }
-  const isAuthenticated = computed(() => !!user.value);
-  return { user, isAuthenticated, login, logout };
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\composables\useAuth.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
-
-// src/helpers/acl.js
-
-export function can(user, needed) {
-    if (!user) return false;
-    const perms = new Set((user.permissions || []).map(String));
-    const list = Array.isArray(needed) ? needed : (needed ? [needed] : []);
-    return list.every(p => perms.has(String(p)));
-  }
-  
-  // Aussi un export default pour compatibilitÃ©
-  export default can;
-  
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\helpers\acl.js =====
+===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\core\index.js =====
 
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\main.js =====
 
@@ -5011,7 +5322,7 @@ import AddUserForm from '@/components/AddUserForm.vue'
 import AddOperatorForm from '@/components/AddOperatorForm.vue'
 import DashboardOperator from '@/components/DashboardOperator.vue'
 
-import { useAuth } from '../composables/useAuth'
+import { useAuth } from '../appCore.js'
 
 const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
 const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
@@ -5076,731 +5387,414 @@ export default router
 
 ===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\router\index.js =====
 
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('token') || '')
-  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
-
-  const isAuthenticated = computed(() => !!token.value)
-  const role = computed(() => user.value?.role || null)
-
-  function setAuth(newToken, newUser) {
-    token.value = newToken
-    user.value = newUser
-    localStorage.setItem('token', newToken)
-    localStorage.setItem('user', JSON.stringify(newUser))
-  }
-
-  function logout() {
-    token.value = ''
-    user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  }
-
-  return { token, user, isAuthenticated, role, setAuth, logout }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-export const useAuthStore = defineStore('auth', {
-  state: () => ({
-  isAuthenticated: false,
-  user: null, // { email, role_id, organization_id }
-  token: ''
-    isAuthenticated: false,
-    user: null, // { email, role_id, organization_id }
-    token: ''
-  }),
-  getters: {
-  isAdmin: (state) => state.user?.role_id === 1,
-  isOperator: (state) => state.user?.role_id === 2,
-  isUser: (state) => state.user?.role_id === 3,
-    isAdmin: (state) => state.user?.role_id === 1,
-    isOperator: (state) => state.user?.role_id === 2,
-    isUser: (state) => state.user?.role_id === 3,
-  },
-  actions: {
-  logout() {
-    this.isAuthenticated = false
-    this.user = null
-    this.token = ''
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-  },
-    logout() {
-      this.isAuthenticated = false
-      this.user = null
-      this.token = ''
-      localStorage.removeItem('token')
-      // Optionally: use router.push('/login') if router is available here
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\authStore.ts =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-import { defineStore } from 'pinia'
-import { useAuthStore } from './authStore'
-
-export const useSiteStore = defineStore('site', {
-  state: () => ({
-    sites: [],
-  }),
-  actions: {
-    async fetchSites() {
-      const auth = useAuthStore()
-      let url = '/api/sites'
-      // Optionally add org/user filter params based on role
-      this.sites = await fetch(url, {
-        headers: { Authorization: `Bearer ${auth.token}` }
-      }).then(r => r.json())
-    }
-  },
-  getters: {
-    filteredSites(state) {
-      const auth = useAuthStore()
-      if (auth.role === 'Administrator') return state.sites
-      if (auth.role === 'Operator') return state.sites.filter(s => s.organization_id === auth.user.organization_id)
-      if (auth.role === 'User') return state.sites.filter(s => auth.user.site_ids?.includes(s.id))
-      return []
-    }
-  }
-})
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\stores\siteStore.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-// src/frontend/src/utils/agentsApi.js
-// Client minimal pour les endpoints MikroTik (agents) du backend.
-
-import { API } from '@/utils/api.js'
-
-function authHeaders() {
-  const t = localStorage.getItem('token') || ''
-  return {
-    'Content-Type': 'application/json',
-    ...(t ? { Authorization: 'Bearer ' + t } : {})
-  }
-}
-
-export async function listAgents() {
-  const res = await fetch(`${API}/api/mikrotik/list`, { headers: authHeaders() })
-  if (!res.ok) throw new Error('List failed')
-  return res.json() // [{ mac, ip, status, site_id }]
-}
-
-export async function preregister(mac, siteId = null) {
-  const body = siteId ? { mac, site_id: siteId } : { mac }
-  const res = await fetch(`${API}/api/mikrotik/preregister`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(body)
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || data.message || 'Pre-register failed')
-  return data // { internal_ip, private_key, public_key, mikrotik_config, server_peer }
-}
-
-export async function testAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/test`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || 'Test failed')
-  return data // { ok: bool }
-}
-
-export async function disableAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/disable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Disable failed')
-}
-
-export async function enableAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik/enable`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Enable failed')
-}
-
-export async function associateAgent(mac, siteId) {
-  const res = await fetch(`${API}/api/mikrotik/associate`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac, site_id: siteId })
-  })
-  if (!res.ok) throw new Error('Associate failed')
-}
-
-export async function deleteAgent(mac) {
-  const res = await fetch(`${API}/api/mikrotik`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-    body: JSON.stringify({ mac })
-  })
-  if (!res.ok) throw new Error('Delete failed')
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\agentsApi.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-// src/frontend/src/utils/api.js
-
-export const API = 'http://localhost:8000';
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\api.js =====
-
-===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
-
-// src/frontend/src/utils/particles.js
-// Utilities to safely use particles.js (Vincent Garreau) with Vue & theme switching
-
-let _scriptPromise = null
-
-/**
- * Load particles.js from CDN once.
- * Resolves immediately if already present.
- */
-export function loadParticlesScript () {
-  if (typeof window !== 'undefined' && window.particlesJS) {
-    return Promise.resolve()
-  }
-  if (_scriptPromise) return _scriptPromise
-
-  _scriptPromise = new Promise((resolve, reject) => {
-    try {
-      const s = document.createElement('script')
-      s.src = 'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js'
-      s.async = true
-      s.onload = () => resolve()
-      s.onerror = () => reject(new Error('Failed to load particles.js'))
-      document.head.appendChild(s)
-    } catch (e) {
-      // not empty: log + reject
-      console.debug('[particles] creating script tag failed', e)
-      reject(e)
-    }
-  }).catch((e) => {
-    // not empty: log then rethrow for callers who care
-    console.debug('[particles] script load failed', e)
-    throw e
-  })
-
-  return _scriptPromise
-}
-
-/**
- * Ensure the global pJSDom array exists (created by the lib).
- */
-export function ensurePJSDom () {
-  try {
-    if (typeof window !== 'undefined' && !window.pJSDom) {
-      window.pJSDom = []
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] ensurePJSDom error', e)
-  }
-}
-
-/**
- * Destroy particles instance bound to a given container id.
- */
-export function destroyForId (id) {
-  try {
-    const list = (typeof window !== 'undefined' && window.pJSDom) ? window.pJSDom : []
-    for (let i = list.length - 1; i >= 0; i--) {
-      try {
-        const inst = list[i]
-        const el = inst?.pJS?.canvas?.el
-        const hostId =
-          (el && el.parentElement && el.parentElement.id) ||
-          inst?.tag?.id ||
-          null
-        if (hostId === id) {
-          const vendors = inst?.pJS?.fn?.vendors
-          if (vendors?.destroypJS) vendors.destroypJS()
-          if (vendors?.destroy) vendors.destroy()
-          list.splice(i, 1)
-        }
-      } catch (e) {
-        // not empty
-        console.debug('[particles] single destroy failed', e)
-      }
-    }
-  } catch (e) {
-    // not empty
-    console.debug('[particles] destroyForId failed', e)
-  }
-}
-
-/**
- * Render particles into an element by id, defensively.
- * Returns true on success, false if skipped (no elem or no lib).
- */
-export function safeRender (id, config) {
-  try {
-    const el = typeof document !== 'undefined' ? document.getElementById(id) : null
-    if (!el) return false
-    if (typeof window === 'undefined' || !window.particlesJS) return false
-
-    destroyForId(id)
-    window.particlesJS(id, config)
-    return true
-  } catch (e) {
-    // not empty
-    console.debug('[particles] render failed', e)
-    return false
-  }
-}
-
-/**
- * Observe theme changes (data-theme attr on <html>) and re-render particles.
- * Returns a function to stop observing.
- */
-export function observeTheme (id, renderFn) {
-  const target = typeof document !== 'undefined' ? document.documentElement : null
-  if (!target) return () => {}
-
-  const observer = new MutationObserver(() => {
-    try {
-      destroyForId(id)
-      renderFn?.()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] theme change error', e)
-    }
-  })
-
-  try {
-    observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] })
-  } catch (e) {
-    // not empty
-    console.debug('[particles] observer start failed', e)
-  }
-
-  return () => {
-    try {
-      observer.disconnect()
-    } catch (e) {
-      // not empty
-      console.debug('[particles] observer cleanup failed', e)
-    }
-  }
-}
-
-/**
- * Detect if current theme is dark based on data-theme attribute.
- */
-export function themeIsDark () {
-  try {
-    const t = typeof document !== 'undefined'
-      ? document.documentElement.getAttribute('data-theme')
-      : null
-    return t !== 'light'
-  } catch (e) {
-    // not empty
-    console.debug('[particles] themeIsDark error', e)
-    return true
-  }
-}
-
-/**
- * Minimal default config that adapts to theme.
- */
-export function defaultConfig (isDark = true) {
-  const baseColor = isDark ? '#00c2c2' : '#0ea5a5'
-  const linkColor = isDark ? '#5eead4' : '#14b8a6'
-  const bgColor = isDark ? '#0e111a' : '#f6f8fb'
-
-  return {
-    particles: {
-      number: { value: 60, density: { enable: true, value_area: 800 } },
-      color: { value: baseColor },
-      shape: { type: 'circle' },
-      opacity: { value: 0.4, random: false },
-      size: { value: 3, random: true },
-      line_linked: { enable: true, distance: 130, color: linkColor, opacity: 0.25, width: 1 },
-      move: { enable: true, speed: 1.2, direction: 'none', out_mode: 'out' }
-    },
-    interactivity: {
-      detect_on: 'canvas',
-      events: { onhover: { enable: false }, onclick: { enable: false }, resize: true }
-    },
-    retina_detect: true,
-    background: { color: bgColor }
-  }
-}
-
-
-===== END: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\utils\particles.js =====
-
 ===== BEGIN: C:\Users\matis\VSCodeProject\NetSecure-IQ\src\frontend\src\views\agents\AgentDashboard.vue =====
 
+<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
 <template>
   <div class="agents-page">
-    <div class="card">
-      <header class="head">
-        <div>
-          <h2 class="title">MikroTik Agent Management</h2>
-          <p class="muted">Monitor, associate, and manage your deployed routers.</p>
-        </div>
+    <!-- Background particles -->
+    <BackgroundParticles />
 
-        <RouterLink class="btn primary" to="/agents/register">
-          <i class="fas fa-keyboard"></i>
-          Pre-register an Agent
-        </RouterLink>
-      </header>
+    <div class="agents-wrapper">
+      <div class="agents-container">
+        <div class="agents-card">
+          <!-- Header -->
+          <div class="header-row">
+            <div class="titles">
+              <h2>MikroTik Agent Management</h2>
+              <p class="subtitle">Monitor, associate, and manage your deployed routers.</p>
+            </div>
 
-      <!-- Toolbar -->
-      <div class="toolbar">
-        <div class="search">
-          <i class="fas fa-search"></i>
-          <input v-model="q" type="text" placeholder="Search by MAC, organization, or site" />
-        </div>
+            <RouterLink to="/agents/register" class="btn primary">
+              <i class="fas fa-microchip"></i>
+              <span>Pre-register an Agent</span>
+            </RouterLink>
+          </div>
 
-        <div class="filters">
-          <button class="pill" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">
-            <span class="dot all"></span> All
-          </button>
-          <button class="pill" :class="{ active: statusFilter === 'Associated' }" @click="statusFilter = 'Associated'">
-            <span class="dot green"></span> Associated
-          </button>
-          <button class="pill" :class="{ active: statusFilter === 'Unassociated' }" @click="statusFilter = 'Unassociated'">
-            <span class="dot amber"></span> Unassociated
-          </button>
-          <button class="pill" :class="{ active: statusFilter === 'Deactivated' }" @click="statusFilter = 'Deactivated'">
-            <span class="dot red"></span> Deactivated
-          </button>
-        </div>
+          <!-- Toolbar -->
+          <div class="toolbar">
+            <div class="search">
+              <i class="fas fa-search"></i>
+              <input
+                v-model.trim="query"
+                type="text"
+                placeholder="Search by MAC, organization, or site"
+                aria-label="Search"
+              />
+            </div>
 
-        <div class="actions">
-          <button class="btn ghost" :disabled="!hasSelection" @click="associatePrompt">
-            <i class="fas fa-link"></i> Associate
-          </button>
-          <button class="btn ghost" :disabled="!hasSelection" @click="activate">
-            <i class="fas fa-toggle-on"></i> Activate
-          </button>
-          <button class="btn ghost" :disabled="!hasSelection" @click="deactivate">
-            <i class="fas fa-toggle-off"></i> Deactivate
-          </button>
-          <button class="btn danger" :disabled="!hasSelection" @click="remove">
-            <i class="fas fa-trash"></i> Delete
-          </button>
-        </div>
-      </div>
+            <div class="actions">
+              <button class="btn ghost" :disabled="!selectedAgent" @click="onAssociate">
+                <i class="fas fa-link"></i><span>Associate</span>
+              </button>
+              <button class="btn ghost" :disabled="!selectedAgent" @click="onDeactivate">
+                <i class="fas fa-ban"></i><span>Deactivate</span>
+              </button>
+              <button class="btn ghost danger" :disabled="!selectedAgent" @click="onDelete">
+                <i class="fas fa-trash"></i><span>Delete</span>
+              </button>
+            </div>
 
-      <!-- Table -->
-      <div class="table-wrapper">
-        <table class="table">
-          <thead>
-            <tr>
-              <th style="width:42px;">
-                <input type="checkbox" :checked="allVisibleChecked" @change="toggleAllVisible($event)" />
-              </th>
-              <th>MAC Address</th>
-              <th>Status</th>
-              <th>Organization</th>
-              <th>Site</th>
-              <th>IP (WG)</th>
-              <th style="width:160px;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="a in filteredAgents" :key="a.mac">
-              <td>
-                <input type="checkbox" :checked="selected.has(a.mac)" @change="toggleOne(a.mac, $event)" />
-              </td>
-              <td class="mono">{{ a.mac }}</td>
-              <td>
-                <span
-                  class="badge"
-                  :class="{
-                    green: a.status === 'Associated',
-                    amber: a.status === 'Unassociated',
-                    red: a.status === 'Deactivated'
-                  }"
+            <div class="legend">
+              <span class="chip green"><span class="dot"></span>Associated</span>
+              <span class="chip orange"><span class="dot"></span>Unassociated</span>
+              <span class="chip red"><span class="dot"></span>Deactivated</span>
+            </div>
+          </div>
+
+          <!-- Table -->
+          <div class="table-wrapper">
+            <table class="agents-table" role="table" aria-label="Agent list">
+              <thead>
+                <tr>
+                  <th style="width:72px">Select</th>
+                  <th>MAC Address</th>
+                  <th style="width:170px">Status</th>
+                  <th>Organization</th>
+                  <th>Site</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr
+                  v-for="(a, idx) in filteredAgents"
+                  :key="a.mac"
+                  :class="['row', rowTint(a.status), { selected: idx === selectedIndex } ]"
+                  @click="selectAgent(a, idx)"
                 >
-                  {{ a.status }}
-                </span>
-              </td>
-              <td>{{ a.organization || '—' }}</td>
-              <td>{{ a.site || a.site_id || '—' }}</td>
-              <td class="mono">{{ a.ip || '—' }}</td>
-              <td class="row-actions">
-                <button class="btn tiny ghost" @click="test(a.mac)" :disabled="testing.get(a.mac)">
-                  <i class="fas fa-wifi"></i>
-                  <span v-if="testing.get(a.mac)">Testing…</span>
-                  <span v-else>Test</span>
-                </button>
-                <button v-if="a.status !== 'Deactivated'" class="btn tiny ghost" @click="deactivateOne(a.mac)">
-                  <i class="fas fa-toggle-off"></i> Deactivate
-                </button>
-                <button v-else class="btn tiny ghost" @click="activateOne(a.mac)">
-                  <i class="fas fa-toggle-on"></i> Activate
-                </button>
-              </td>
-            </tr>
+                  <td>
+                    <span class="radio" :class="{ checked: idx === selectedIndex }" aria-hidden="true"></span>
+                    <span class="sr-only">Select {{ a.mac }}</span>
+                  </td>
+                  <td class="mono">{{ a.mac }}</td>
+                  <td>
+                    <span :class="['state', stateClass(a.status)]">{{ label(a.status) }}</span>
+                  </td>
+                  <td>{{ a.organization || 'â€”' }}</td>
+                  <td>{{ a.site || 'â€”' }}</td>
+                </tr>
 
-            <tr v-if="!loading && filteredAgents.length === 0">
-              <td colspan="7" class="empty">No agents match your filters.</td>
-            </tr>
-          </tbody>
-        </table>
+                <tr v-if="isLoading">
+                  <td colspan="5" class="empty">
+                    <i class="fas fa-spinner fa-spin"></i> Loading agents...
+                  </td>
+                </tr>
+                <tr v-else-if="error">
+                  <td colspan="5" class="empty error">
+                    <i class="fas fa-exclamation-circle"></i> {{ error }}
+                  </td>
+                </tr>
+                <tr v-else-if="!filteredAgents.length">
+                  <td colspan="5" class="empty">
+                    <span v-if="query">No agents match your search.</span>
+                    <span v-else>No agents found. <a href="#" @click.prevent="$router.push('/agents/register')">Register a new agent</a></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-        <div v-if="loading" class="loading">Loading…</div>
-        <div v-if="error" class="alert error">Failed to load agents: {{ error }}</div>
-        <div v-if="notice" class="alert ok">{{ notice }}</div>
+          <!-- Toast -->
+          <p v-if="toast" class="toast" :class="toastType">{{ toast }}</p>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, computed, reactive } from 'vue'
-import { apiFetch } from '@/utils/api.js'
+import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import { ref, computed, onMounted } from 'vue'
 
+// API base URL
+const API_BASE_URL = 'http://localhost:8000/api'
+
+// Agents data
 const agents = ref([])
-const loading = ref(false)
-const error = ref('')
-const notice = ref('')
+const isLoading = ref(true)
+const error = ref(null)
 
-const q = ref('')
-const statusFilter = ref('all')
-const selected = reactive(new Set())
-const testing = reactive(new Map())
-
-const token = localStorage.getItem('token') || ''
-const headers = {
-  'Content-Type': 'application/json',
-  ...(token ? { Authorization: `Bearer ${token}` } : {})
+// Fetch agents from API
+const fetchAgents = async () => {
+  try {
+    isLoading.value = true
+    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
+    if (!response.ok) throw new Error('Failed to fetch')
+    const data = await response.json()
+    agents.value = data.map(device => ({
+      mac: device.mac,
+      status: device.status || 'unassociated',
+      organization: device.organization || '',
+      site: device.site || '',
+      site_id: device.site_id || ''
+    }))
+  } catch (err) {
+    console.error('Failed to fetch agents:', err)
+    error.value = 'Failed to load agents. Please try again.'
+    showToast('Failed to load agents', 'error')
+  } finally {
+    isLoading.value = false
+  }
 }
 
-const filteredAgents = computed(() => {
-  const search = q.value.trim().toLowerCase()
-  return agents.value.filter(a => {
-    const okStatus = statusFilter.value === 'all' || a.status === statusFilter.value
-    const hay = [a.mac, a.organization || '', a.site || a.site_id || '', a.ip || ''].join(' ').toLowerCase()
-    return okStatus && (!search || hay.includes(search))
-  })
+// Initialize component
+onMounted(() => {
+  fetchAgents()
 })
 
-const hasSelection = computed(() => selected.size > 0)
-const allVisibleChecked = computed(() => filteredAgents.value.length > 0 && filteredAgents.value.every(a => selected.has(a.mac)))
+/** Search & selection */
+const query = ref('')
+const selectedAgent = ref(null)
+const selectedIndex = ref(-1)
 
-function toggleOne(mac, ev) { ev.target.checked ? selected.add(mac) : selected.delete(mac) }
-function toggleAllVisible(ev) { ev.target.checked ? filteredAgents.value.forEach(a => selected.add(a.mac)) : filteredAgents.value.forEach(a => selected.delete(a.mac)) }
+const filteredAgents = computed(() => {
+  const q = query.value.toLowerCase()
+  if (!q) return agents.value
+  return agents.value.filter(a =>
+    a.mac.toLowerCase().includes(q) ||
+    a.organization?.toLowerCase().includes(q) ||
+    a.site?.toLowerCase().includes(q)
+  )
+})
 
-async function loadAgents() {
-  loading.value = true
-  error.value = ''
-  notice.value = ''
+function selectAgent(a, idx) {
+  selectedAgent.value = a
+  selectedIndex.value = idx
+}
+
+/** Actions (stubs) */
+const toast = ref('')
+const toastType = ref('success')
+const showToast = (msg, type = 'success') => {
+  toast.value = msg
+  toastType.value = type
+  setTimeout(() => (toast.value = ''), 2200)
+}
+
+async function onAssociate() {
+  if (!selectedAgent.value) return
+  
   try {
-    const res = await apiFetch('/api/mikrotik/list', { headers })
-    const data = await res.json()
-    agents.value = data.map(r => ({
-      mac: r.mac,
-      ip: r.ip || r.vpn_internal_ip || null,
-      status: r.status,
-      site_id: r.site_id || null,
-      site: r.site || null,
-      organization: r.organization || null
-    }))
-  } catch (e) {
-    error.value = e?.message || 'Failed to fetch'
-  } finally {
-    loading.value = false
+    const siteId = prompt('Enter Site ID to associate with this agent:')
+    if (!siteId) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/associate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac,
+        site_id: siteId
+      })
+    })
+    if (!response.ok) throw new Error('Association failed')
+    
+    await fetchAgents()
+    showToast('Agent associated successfully')
+  } catch (err) {
+    console.error('Association failed:', err)
+    showToast('Failed to associate agent', 'error')
   }
 }
-
-async function callJson(path, method, body) {
-  const res = await apiFetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined
-  })
-  if (res.status === 204) return null
-  const j = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(j.error || j.message || `HTTP ${res.status}`)
-  return j
-}
-
-async function test(mac) {
-  testing.set(mac, true)
-  notice.value = ''
+async function onDeactivate() {
+  if (!selectedAgent.value) return
+  
   try {
-    const data = await callJson('/api/mikrotik/test', 'POST', { mac })
-    notice.value = data?.ok ? `Ping OK for ${mac}` : `Ping failed for ${mac}`
-  } catch (e) {
-    notice.value = `Ping failed for ${mac}: ${e?.message || 'error'}`
-  } finally {
-    testing.set(mac, false)
+    const confirmDeactivate = confirm(`Are you sure you want to deactivate agent ${selectedAgent.value.mac}?`)
+    if (!confirmDeactivate) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik/disable`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mac: selectedAgent.value.mac
+      })
+    })
+    if (!response.ok) throw new Error('Deactivation failed')
+    
+    await fetchAgents()
+    showToast('Agent deactivated', 'success')
+  } catch (err) {
+    console.error('Deactivation failed:', err)
+    showToast('Failed to deactivate agent', 'error')
   }
 }
-
-async function activateOne(mac) {
+async function onDelete() {
+  if (!selectedAgent.value) return
+  
   try {
-    await callJson('/api/mikrotik/enable', 'POST', { mac })
-    notice.value = `Agent ${mac} activated`
-  } catch (e) {
-    notice.value = `Activate failed: ${e?.message || 'error'}`
-  } finally {
-    await loadAgents()
-  }
-}
-async function deactivateOne(mac) {
-  try {
-    await callJson('/api/mikrotik/disable', 'POST', { mac })
-    notice.value = `Agent ${mac} deactivated`
-  } catch (e) {
-    notice.value = `Deactivate failed: ${e?.message || 'error'}`
-  } finally {
-    await loadAgents()
+    const confirmDelete = confirm(`Are you sure you want to delete agent ${selectedAgent.value.mac}? This action cannot be undone.`)
+    if (!confirmDelete) return
+    
+    const response = await fetch(`${API_BASE_URL}/mikrotik`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mac: selectedAgent.value.mac })
+    })
+    if (!response.ok) throw new Error('Deletion failed')
+    
+    await fetchAgents()
+    selectedAgent.value = null
+    selectedIndex.value = -1
+    showToast('Agent deleted successfully', 'success')
+  } catch (err) {
+    console.error('Deletion failed:', err)
+    showToast('Failed to delete agent', 'error')
   }
 }
 
-async function activate() { for (const mac of selected) await activateOne(mac); selected.clear() }
-async function deactivate() { for (const mac of selected) await deactivateOne(mac); selected.clear() }
-async function remove() {
-  if (!confirm(`Delete ${selected.size} agent(s) ?`)) return
-  for (const mac of selected) {
-    try { await callJson('/api/mikrotik', 'DELETE', { mac }) }
-    catch (e) { notice.value = `Delete failed for ${mac}: ${e?.message || 'error'}` }
-  }
-  selected.clear()
-  await loadAgents()
+/** Display helpers */
+function label(status) {
+  return status === 'associated'
+    ? 'Associated'
+    : status === 'unassociated'
+    ? 'Unassociated'
+    : 'Deactivated'
 }
-async function associatePrompt() {
-  const site = prompt('Enter Site ID to associate:')
-  if (!site) return
-  for (const mac of selected) {
-    try { await callJson('/api/mikrotik/associate', 'POST', { mac, site_id: site }) }
-    catch (e) { notice.value = `Associate failed for ${mac}: ${e?.message || 'error'}` }
-  }
-  selected.clear()
-  await loadAgents()
+function stateClass(status) {
+  return status === 'associated'
+    ? 'green'
+    : status === 'unassociated'
+    ? 'orange'
+    : 'red'
 }
-
-onMounted(loadAgents)
+function rowTint(status) {
+  return status === 'associated'
+    ? 'tint-green'
+    : status === 'unassociated'
+    ? 'tint-orange'
+    : 'tint-red'
+}
 </script>
 
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 
-.agents-page { display: flex; justify-content: center; padding: 24px; }
-.card {
-  width: 100%; max-width: 1100px;
+:root {
+  --bg-dark: #0e111a;
+  --panel-grey: #1a1d26;
+  --divider-grey: #2a2d36;
+  --text-primary: #f5f7fa;
+  --text-secondary: #9ca3af;
+  --primary-accent: #00c2c2;
+  --primary-hover: #00a7a7;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --radius: 12px;
+}
+
+/* Page layout */
+.agents-page { position: relative; min-height: 100vh; overflow: hidden; }
+.agents-wrapper { position: relative; z-index: 10; display: flex; justify-content: center; padding: 32px; }
+.agents-container { width: 100%; max-width: 1120px; }
+.agents-card {
   background: var(--panel-grey);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 14px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
-  padding: 18px;
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.05);
+  box-shadow: 0 0 40px rgba(0,194,194,.05);
 }
-.head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.title { margin: 0; font-size: 18px; }
-.muted { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
 
-.toolbar {
-  display: grid; grid-template-columns: 1fr auto auto;
-  gap: 12px; align-items: center; margin-bottom: 12px;
-}
-.search {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 10px; padding: 8px 10px;
-}
-.search input { background: transparent; border: none; outline: none; color: var(--text-primary); width: 100%; }
-.filters { display: flex; gap: 8px; }
-.pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 10px; border-radius: 999px;
-  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
-  color: var(--text-primary); cursor: pointer; font-size: 12px;
-}
-.pill.active { outline: 2px solid var(--primary-accent); }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.all { background: #64748b; }
-.dot.green { background: #22c55e; }
-.dot.amber { background: #f59e0b; }
-.dot.red { background: #ef4444; }
+/* Header */
+.header-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; }
+.titles h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
+.subtitle { margin: 4px 0 0; color: var(--text-secondary); }
 
-.actions { display: flex; gap: 8px; }
+/* Buttons */
 .btn {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 10px 12px; border-radius: 8px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.06);
-  color: var(--text-primary); cursor: pointer;
+  border-radius: 10px; padding: 10px 14px; font-weight: 600;
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.06);
+  color: var(--text-primary); cursor: pointer; transition: .15s;
 }
-.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn:hover { background: rgba(255,255,255,.10); }
 .btn.primary {
-  border-color: rgba(0,194,194,.35);
-  background: rgba(0,194,194,.12);
-  color: var(--primary-accent);
-  font-weight: 700;
+  background: var(--primary-accent); color: #0e111a; border-color: transparent;
 }
-.btn.ghost:hover { background: rgba(255,255,255,.08); }
-.btn.danger { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.25); color:#ef4444; }
-.btn.tiny { padding: 6px 8px; font-size: 12px; }
+.btn.primary:hover { background: var(--primary-hover); color: #fff; }
+.btn.ghost.danger { border-color: rgba(239,68,68,.35); color: #fca5a5; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 
-.table-wrapper { position: relative; }
-.table {
-  width: 100%; border-collapse: collapse;
-  background: rgba(12,16,24,.35);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 10px; overflow: hidden;
+/* Toolbar */
+.toolbar {
+  margin-top: 16px; display: grid; gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  align-items: center;
 }
-thead th {
-  text-align: left; font-weight: 700; font-size: 12px;
-  color: var(--text-secondary); background: rgba(18,22,32,.7);
-  padding: 10px 12px;
+.search {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  padding: 10px 12px; border-radius: 10px;
 }
-tbody td { padding: 10px 12px; border-top: 1px solid rgba(255,255,255,.06); }
-tbody tr:hover { background: rgba(255,255,255,.02); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-.badge {
-  padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
-  background: rgba(255,255,255,.08); color: var(--text-primary);
+.search input {
+  border: none; outline: none; background: transparent; color: var(--text-primary); width: 100%;
 }
-.badge.green { background: rgba(34,197,94,.15); color:#22c55e; }
-.badge.amber { background: rgba(245,158,11,.15); color:#f59e0b; }
-.badge.red { background: rgba(239,68,68,.15); color:#ef4444; }
+.actions { display: flex; gap: 8px; }
+.legend { display: flex; gap: 8px; justify-self: end; }
 
-.row-actions { display: flex; gap: 6px; }
+/* Chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.06);
+}
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chip.green  .dot { background: #16a34a; }
+.chip.orange .dot { background: #f59e0b; }
+.chip.red    .dot { background: #ef4444; }
 
-.loading { margin-top: 10px; color: var(--text-secondary); }
-.alert { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
-.alert.error { background: rgba(239,68,68,.12); color:#ef4444; border:1px solid rgba(239,68,68,.25); }
-.alert.ok { background: rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.25); }
-.empty { text-align: center; color: var(--text-secondary); }
+/* Table */
+.table-wrapper { margin-top: 14px; overflow: auto; border-radius: 12px; border: 1px solid rgba(255,255,255,.06); }
+.agents-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.agents-table thead th {
+  text-align: left; padding: 12px 14px; background: rgba(255,255,255,.04);
+  border-bottom: 1px solid rgba(255,255,255,.08); color: var(--text-secondary);
+}
+.agents-table tbody td { padding: 14px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2px; }
+
+.row { transition: background .15s, outline .15s; cursor: pointer; }
+.row:hover { outline: 1px solid rgba(255,255,255,.08); }
+.selected { outline: 2px solid rgba(0,194,194,.35); }
+
+/* Subtle row tint by status */
+.tint-green  { background: rgba(22,163,74,.06); }
+.tint-orange { background: rgba(245,158,11,.06); }
+.tint-red    { background: rgba(239,68,68,.06); }
+
+/* Custom radio */
+.radio { display:inline-block; width:12px; height:12px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.35); vertical-align: middle; margin-right: 6px; }
+.radio.checked { background: var(--primary-accent); border-color: var(--primary-accent); }
+
+/* Status badges */
+.state {
+  display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: 600; font-size: 12px;
+}
+.state.green  { background: rgba(22,163,74,.15); color:#22c55e; }
+.state.orange { background: rgba(245,158,11,.15); color:#fbbf24; }
+.state.red    { background: rgba(239,68,68,.15); color:#f87171; }
+
+/* Empty state */
+.empty { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* Toast */
+.toast {
+  margin-top: 12px; text-align:center; padding: 10px 12px; border-radius: 8px; font-size: 14px;
+}
+.toast.success { background: rgba(34,197,94,.12); color: var(--success); }
+.toast.error   { background: rgba(239,68,68,.12); color: var(--danger); }
+
+/* Responsive */
+@media (max-width: 980px) {
+  .toolbar { grid-template-columns: 1fr; }
+  .legend { justify-self: start; }
+}
 </style>
 
 
@@ -5903,7 +5897,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 
 <script setup>
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import { API } from '@/utils/api.js'
+import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -5925,22 +5919,14 @@ function formatMac() {
 }
 const macValid = computed(() => /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac.value))
 
+import { preregister } from '@/appCore.js'
+
 async function submit() {
   if (!macValid.value) return showToast('Invalid MAC address', false)
   loading.value = true
   result.value = null
-  const token = localStorage.getItem('token') || ''
   try {
-    const body = { mac: mac.value }
-    if (siteId.value.trim()) body.site_id = siteId.value.trim()
-
-    const res = await fetch(`${API}/api/mikrotik/preregister`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body)
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || data.message || 'Pre-registration failed')
+    const data = await preregister(mac.value, siteId.value.trim() || undefined)
     result.value = data
     showToast('âœ… Pre-registration complete')
   } catch (e) {
@@ -5949,6 +5935,7 @@ async function submit() {
     loading.value = false
   }
 }
+
 
 function copy(text) {
   navigator.clipboard.writeText(String(text || '')).then(
@@ -6193,36 +6180,29 @@ function downloadRsc() {
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { API } from '@/utils/api.js'
+import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
 
 /* ---------- State ---------- */
-const rows = ref([])           // [{mac, ip, status, site_id}]
-const loading = ref(false)
-const message = ref('')
-const ok = ref(false)
+const agents = ref([])           // DonnÃ©es des agents du backend
+const loading = ref(false)       // Ã‰tat de chargement
+const message = ref('')          // Message de statut
+const ok = ref(false)            // Ã‰tat du message (succÃ¨s/erreur)
+const error = ref(null)          // Erreur de chargement
 
-const selected = ref(new Set())
-const search = ref('')
-const statusFilter = ref('all') // 'all' | 'Associated' | 'Unassociated' | 'Deactivated'
+const selected = ref(new Set())  // Ã‰lÃ©ments sÃ©lectionnÃ©s
+const search = ref('')           // Terme de recherche
+const statusFilter = ref('all')  // Filtre par statut: 'all' | 'associated' | 'unassociated' | 'deactivated'
 
 /* ---------- Fetch list ---------- */
-async function load() {
+const load = async () => {
   loading.value = true
-  message.value = ''
+  error.value = null
   try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`${API}/api/mikrotik/list`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: 'Bearer ' + token } : {})
-      }
-    })
-    const data = await res.json().catch(() => [])
-    if (!res.ok) throw new Error(data?.error || 'Failed to load agents')
-    rows.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    rows.value = []
-    message.value = 'Failed to load agents: ' + (e?.message || 'unknown error')
+    agents.value = await listAgents()
+  } catch (err) {
+    console.error('Failed to load agents:', err)
+    error.value = 'Failed to load agents. Please try again later.'
+    message.value = error.value
     ok.value = false
   } finally {
     loading.value = false
@@ -6233,10 +6213,18 @@ onMounted(load)
 /* ---------- Filters / selection ---------- */
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
-  return rows.value.filter(r => {
-    const s = String(r.status || '').toLowerCase()
-    const hitStatus =
-      statusFilter.value === 'all' ? true : r.status === statusFilter.value
+  return agents.value.filter(agent => {
+    // Filtre par recherche
+    const matchesSearch = !q || 
+      agent.mac.toLowerCase().includes(q) ||
+      (agent.organization && agent.organization.toLowerCase().includes(q)) ||
+      (agent.site_id && agent.site_id.toLowerCase().includes(q))
+    
+    // Filtre par statut
+    const matchesStatus = statusFilter.value === 'all' || 
+      agent.status.toLowerCase() === statusFilter.value.toLowerCase()
+    
+    return matchesSearch && matchesStatus
     const hitSearch =
       !q ||
       r.mac?.toLowerCase().includes(q) ||
@@ -6266,11 +6254,19 @@ function toggleAllVisible(e) {
 }
 
 /* ---------- Helpers ---------- */
-function badgeClass(st) {
-  if (st === 'Associated') return 'green'
-  if (st === 'Unassociated') return 'amber'
-  if (st === 'Deactivated') return 'red'
-  return 'gray'
+const badgeClass = (status) => {
+  if (!status) return 'secondary'
+  
+  switch (status.toLowerCase()) {
+    case 'associated':
+      return 'success'
+    case 'unassociated':
+      return 'warning'
+    case 'deactivated':
+      return 'danger'
+    default:
+      return 'secondary'
+  }
 }
 async function callJson(url, method, body) {
   const token = localStorage.getItem('token') || ''
@@ -6288,19 +6284,22 @@ async function callJson(url, method, body) {
 }
 
 /* ---------- Row actions ---------- */
-async function testPing(mac) {
+const testPing = async (mac) => {
   try {
-    const { ok: pong } = await callJson(`${API}/api/mikrotik/test`, 'POST', { mac })
-    message.value = pong ? `Ping OK for ${mac}` : `Ping failed for ${mac}`
-    ok.value = !!pong
-  } catch (e) {
-    message.value = `Ping error for ${mac}: ${e.message}`
+    const data = await testAgent(mac)
+    message.value = data.message || 'Ping successful!'
+    ok.value = true
+    // Recharger la liste aprÃ¨s un test rÃ©ussi
+    await load()
+  } catch (err) {
+    message.value = err.message || 'Ping failed'
     ok.value = false
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
-async function activateOne(mac) {
+const activateOne = async (mac) => {
   try {
-    await callJson(`${API}/api/mikrotik/enable`, 'POST', { mac })
+    await enableAgent(mac)
     ok.value = true
     message.value = `Activated ${mac}`
     await load()
@@ -6309,83 +6308,99 @@ async function activateOne(mac) {
     message.value = `Activate failed for ${mac}: ${e.message}`
   }
 }
-async function deactivateOne(mac) {
+const deactivateOne = async (mac) => {
   try {
-    await callJson(`${API}/api/mikrotik/disable`, 'POST', { mac })
+    await disableAgent(mac)
+    message.value = 'Agent deactivated!'
     ok.value = true
-    message.value = `Deactivated ${mac}`
     await load()
-  } catch (e) {
+  } catch (err) {
+    message.value = err.message || 'Deactivation failed'
     ok.value = false
-    message.value = `Deactivate failed for ${mac}: ${e.message}`
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
-async function deleteOne(mac) {
-  if (!confirm(`Delete agent ${mac} ?`)) return
+const deleteOne = async (mac) => {
+  if (!confirm('Are you sure you want to delete this agent?')) return
   try {
-    await callJson(`${API}/api/mikrotik`, 'DELETE', { mac })
+    await deleteAgent(mac)
+    message.value = 'Agent deleted!'
     ok.value = true
-    message.value = `Deleted ${mac}`
     await load()
-  } catch (e) {
+  } catch (err) {
+    message.value = err.message || 'Deletion failed'
     ok.value = false
-    message.value = `Delete failed for ${mac}: ${e.message}`
   }
+  setTimeout(() => { message.value = '' }, 3000)
 }
 
 /* ---------- Bulk actions ---------- */
-async function activateSelected() {
-  await bulk(selected.value, m => callJson(`${API}/api/mikrotik/enable`, 'POST', { mac: m }), 'Activated')
+const activateSelected = () => bulk(selected.value, enableAgent, 'activate')
+const deactivateSelected = () => bulk(selected.value, disableAgent, 'deactivate')
+const deleteSelected = () => {
+  if (!confirm(`Delete ${selected.value.size} selected agents?`)) return
+  bulk(selected.value, deleteAgent, 'delete')
 }
-async function deactivateSelected() {
-  await bulk(selected.value, m => callJson(`${API}/api/mikrotik/disable`, 'POST', { mac: m }), 'Deactivated')
-}
-async function deleteSelected() {
-  if (!confirm(`Delete ${selected.value.size} agent(s) ?`)) return
-  await bulk(selected.value, m => callJson(`${API}/api/mikrotik`, 'DELETE', { mac: m }), 'Deleted')
-}
-async function bulk(set, fn, verb) {
-  message.value = ''
-  ok.value = true
-  try {
-    for (const mac of set) {
+const bulk = async (set, fn, verb) => {
+  if (set.size === 0) return
+  
+  const results = { success: 0, error: 0 }
+  const promises = Array.from(set).map(async mac => {
+    try {
       await fn(mac)
+      results.success++
+    } catch (err) {
+      console.error(`Failed to ${verb} ${mac}:`, err)
+      results.error++
     }
-    message.value = `${verb} ${set.size} agent(s).`
-    selected.value = new Set()
-    await load()
-  } catch (e) {
-    ok.value = false
-    message.value = `${verb} failed: ${e.message}`
-  }
+  })
+  
+  await Promise.all(promises)
+  message.value = `${verb} completed: ${results.success} succeeded, ${results.error} failed`
+  ok.value = results.error === 0
+  await load()
+  setTimeout(() => { message.value = '' }, 3000)
 }
 
 /* ---------- Associate (simple modal) ---------- */
 const showAssociate = ref(false)
 const associateSiteId = ref('')
-function openAssociate() {
+const openAssociate = () => {
+  if (selected.value.size === 0) return
   associateSiteId.value = ''
   showAssociate.value = true
 }
-function closeAssociate() {
+
+const closeAssociate = () => {
   showAssociate.value = false
 }
-async function confirmAssociate() {
-  const site_id = associateSiteId.value.trim()
-  if (!site_id) return
-  try {
-    for (const mac of selected.value) {
-      await callJson(`${API}/api/mikrotik/associate`, 'POST', { mac, site_id })
-    }
-    ok.value = true
-    message.value = `Associated ${selected.value.size} agent(s) to site ${site_id}.`
-    selected.value = new Set()
-    closeAssociate()
-    await load()
-  } catch (e) {
+const confirmAssociate = async () => {
+  const siteId = associateSiteId.value.trim()
+  if (!siteId) {
+    message.value = 'Please enter a site ID'
     ok.value = false
-    message.value = `Association failed: ${e.message}`
+    setTimeout(() => { message.value = '' }, 3000)
+    return
   }
+
+  const macs = Array.from(selected.value)
+  const results = { success: 0, error: 0 }
+  
+  for (const mac of macs) {
+    try {
+      await associateAgent(mac, siteId)
+      results.success++
+    } catch (err) {
+      console.error(`Failed to associate ${mac}:`, err)
+      results.error++
+    }
+  }
+  
+  message.value = `Associated ${results.success} agents, ${results.error} failed`
+  ok.value = results.error === 0
+  closeAssociate()
+  await load()
+  setTimeout(() => { message.value = '' }, 3000)
 }
 </script>
 
@@ -6571,7 +6586,7 @@ export { default as RegisterAgent } from './RegisterAgent.vue';
 
             <textarea class="code" readonly rows="12" :value="script"></textarea>
             <p class="note">
-              Apply the script via <em>Files → Run Script</em> or through the router CLI.
+              Apply the script via <em>Files ? Run Script</em> or through the router CLI.
             </p>
           </div>
 
@@ -6778,7 +6793,7 @@ function showToast(msg, type = 'success') {
 defineOptions({ name: 'LoginPage' })
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore } from '@/appCore.js'
 
 const email = ref('')
 const password = ref('')

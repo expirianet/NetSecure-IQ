@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+﻿import { createRouter, createWebHashHistory } from 'vue-router'
 import HomePage from '@/components/HomePage.vue'
 import LoginForm from '@/components/LoginForm.vue'
 import RegisterForm from '@/components/RegisterForm.vue'
@@ -12,8 +12,8 @@ import DashboardOperator from '@/components/DashboardOperator.vue'
 
 import { useAuth } from '../appCore.js'
 
-const AgentDashboard = () => import('@/views/agents/AgentDashboard.vue')
-const RegisterAgent = () => import('@/views/agents/RegisterAgent.vue')
+const AgentDashboard = () => import('@/components/agents/AgentDashboard.vue')
+const RegisterAgent = () => import('@/components/agents/RegisterAgent.vue')
 
 const routes = [
   { path: '/', component: HomePage },
@@ -44,24 +44,24 @@ const router = createRouter({
   routes
 })
 
-// Auth guard + redirection opérateur -> dashboard-operator
+// Auth guard + redirection opÃ©rateur -> dashboard-operator
 router.beforeEach((to, from, next) => {
   const { isAuthenticated } = useAuth()
   const role = (localStorage.getItem('role') || '').toLowerCase()
 
-  // Besoin d'être connecté
+  // Besoin d'Ãªtre connectÃ©
   if (to.meta.requiresAuth && !isAuthenticated.value) {
     next('/login')
     return
   }
 
-  // Si déjà connecté et on va vers login/register -> dashboard adapté au rôle
+  // Si dÃ©jÃ  connectÃ© et on va vers login/register -> dashboard adaptÃ© au rÃ´le
   if ((to.path === '/login' || to.path === '/register') && isAuthenticated.value) {
     next(role === 'operator' ? '/dashboard-operator' : '/dashboard')
     return
   }
 
-  // Un opérateur qui vise /dashboard est redirigé vers /dashboard-operator
+  // Un opÃ©rateur qui vise /dashboard est redirigÃ© vers /dashboard-operator
   if (to.path === '/dashboard' && role === 'operator') {
     next('/dashboard-operator')
     return
@@ -71,3 +71,4 @@ router.beforeEach((to, from, next) => {
 })
 
 export default router
+
