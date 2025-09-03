@@ -39,7 +39,7 @@ services:
   frontend:
     image: nginx:alpine
     volumes:
-      - ./src/frontend/dist:/usr/share/nginx/html:ro
+      - ./src/frontend/dist:/usr/share/nginx/html
     ports:
       - "8080:80"
     depends_on:

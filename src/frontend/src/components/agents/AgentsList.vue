@@ -1,4 +1,5 @@
-﻿<!-- src/frontend/src/components/agents/AgentsList.vue -->
+﻿
+<!-- src/frontend/src/components/agents/AgentsList.vue -->
 <template>
   <div class="agents-page">
     <div class="card">
@@ -26,36 +27,16 @@
         </div>
 
         <div class="filters">
-          <button
-            class="pill"
-            :class="{ active: statusFilter === 'all' }"
-            @click="statusFilter = 'all'"
-            title="All"
-          >
+          <button class="pill" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'" title="All">
             <span class="dot gray"></span> All
           </button>
-          <button
-            class="pill"
-            :class="{ active: statusFilter === 'Associated' }"
-            @click="statusFilter = 'Associated'"
-            title="Associated"
-          >
+          <button class="pill" :class="{ active: statusFilter === 'Associated' }" @click="statusFilter = 'Associated'" title="Associated">
             <span class="dot green"></span> Associated
           </button>
-          <button
-            class="pill"
-            :class="{ active: statusFilter === 'Unassociated' }"
-            @click="statusFilter = 'Unassociated'"
-            title="Unassociated"
-          >
+          <button class="pill" :class="{ active: statusFilter === 'Unassociated' }" @click="statusFilter = 'Unassociated'" title="Unassociated">
             <span class="dot amber"></span> Unassociated
           </button>
-          <button
-            class="pill"
-            :class="{ active: statusFilter === 'Deactivated' }"
-            @click="statusFilter = 'Deactivated'"
-            title="Deactivated"
-          >
+          <button class="pill" :class="{ active: statusFilter === 'Deactivated' }" @click="statusFilter = 'Deactivated'" title="Deactivated">
             <span class="dot red"></span> Deactivated
           </button>
         </div>
@@ -101,25 +82,17 @@
               <td>
                 <span :class="['badge', badgeClass(row.status)]">{{ row.status }}</span>
               </td>
-              <td>â€”<!-- non renvoyÃ© par l'API /list --> </td>
-              <td>{{ row.site_id || 'â€”' }}</td>
-              <td class="mono">{{ row.ip || 'â€”' }}</td>
+              <td>{{ row.organization || '-' }}</td>
+              <td>{{ row.site_id || '-' }}</td>
+              <td class="mono">{{ row.ip || '-' }}</td>
               <td class="right">
                 <button class="btn xs ghost" @click="testPing(row.mac)">
                   <i class="fas fa-satellite-dish"></i> Test
                 </button>
-                <button
-                  v-if="row.status === 'Deactivated'"
-                  class="btn xs ghost"
-                  @click="activateOne(row.mac)"
-                >
+                <button v-if="row.status === 'Deactivated'" class="btn xs ghost" @click="activateOne(row.mac)">
                   <i class="fas fa-toggle-on"></i>
                 </button>
-                <button
-                  v-else
-                  class="btn xs ghost"
-                  @click="deactivateOne(row.mac)"
-                >
+                <button v-else class="btn xs ghost" @click="deactivateOne(row.mac)">
                   <i class="fas fa-toggle-off"></i>
                 </button>
                 <button class="btn xs danger" @click="deleteOne(row.mac)">
@@ -131,16 +104,14 @@
               <td colspan="7" class="empty">No agents match your filters.</td>
             </tr>
             <tr v-if="loading">
-              <td colspan="7" class="empty">Loadingâ€¦</td>
+              <td colspan="7" class="empty">Loading...</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <!-- Messages -->
-      <p v-if="message" class="message" :class="ok ? 'success' : 'error'">
-        {{ message }}
-      </p>
+      <p v-if="message" class="message" :class="ok ? 'success' : 'error'">{{ message }}</p>
     </div>
 
     <!-- Associate dialog (ultra simple) -->
@@ -162,18 +133,53 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { listAgents, enableAgent, disableAgent, deleteAgent, associateAgent, testAgent } from '@/appCore.js'
+
+/* ---------- API base & helpers ---------- */
+const API_BASE_URL = ((import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : 'http://localhost:8081/api').replace(/\/$/, '')
+const jsonHeaders = () => {
+  const token = localStorage.getItem('token')
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: 'Bearer ' + token } : {})
+  }
+}
+async function getJSON(url, opts = {}) {
+  const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...jsonHeaders() } })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || data?.message || `${opts.method || 'GET'} ${url} failed`)
+  return data
+}
 
 /* ---------- State ---------- */
-const agents = ref([])           // DonnÃ©es des agents du backend
-const loading = ref(false)       // Ã‰tat de chargement
-const message = ref('')          // Message de statut
-const ok = ref(false)            // Ã‰tat du message (succÃ¨s/erreur)
-const error = ref(null)          // Erreur de chargement
+const agents = ref([])           // Données des agents du backend
+const loading = ref(false)
+const message = ref('')
+const ok = ref(false)
+const error = ref(null)
 
-const selected = ref(new Set())  // Ã‰lÃ©ments sÃ©lectionnÃ©s
-const search = ref('')           // Terme de recherche
-const statusFilter = ref('all')  // Filtre par statut: 'all' | 'associated' | 'unassociated' | 'deactivated'
+const selected = ref(new Set())
+const search = ref('')
+const statusFilter = ref('all')  // 'all' | 'Associated' | 'Unassociated' | 'Deactivated'
+
+/* ---------- Backend calls (direct) ---------- */
+async function listAgents() {
+  return await getJSON(`${API_BASE_URL}/mikrotik/list`)
+}
+async function enableAgent(mac) {
+  await getJSON(`${API_BASE_URL}/mikrotik/enable`, { method: 'POST', body: JSON.stringify({ mac }) })
+}
+async function disableAgent(mac) {
+  await getJSON(`${API_BASE_URL}/mikrotik/disable`, { method: 'POST', body: JSON.stringify({ mac }) })
+}
+async function deleteAgent(mac) {
+  await getJSON(`${API_BASE_URL}/mikrotik`, { method: 'DELETE', body: JSON.stringify({ mac }) })
+}
+async function associateAgent(mac, site_id) {
+  await getJSON(`${API_BASE_URL}/mikrotik/associate`, { method: 'POST', body: JSON.stringify({ mac, site_id }) })
+}
+async function testAgent(mac) {
+  return await getJSON(`${API_BASE_URL}/mikrotik/test`, { method: 'POST', body: JSON.stringify({ mac }) })
+}
 
 /* ---------- Fetch list ---------- */
 const load = async () => {
@@ -196,73 +202,43 @@ onMounted(load)
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
   return agents.value.filter(agent => {
-    // Filtre par recherche
-    const matchesSearch = !q || 
-      agent.mac.toLowerCase().includes(q) ||
-      (agent.organization && agent.organization.toLowerCase().includes(q)) ||
-      (agent.site_id && agent.site_id.toLowerCase().includes(q))
-    
-    // Filtre par statut
-    const matchesStatus = statusFilter.value === 'all' || 
-      agent.status.toLowerCase() === statusFilter.value.toLowerCase()
-    
-    return matchesSearch && matchesStatus
-    const hitSearch =
+    const matchesSearch =
       !q ||
-      r.mac?.toLowerCase().includes(q) ||
-      r.site_id?.toLowerCase().includes(q)
-    return hitStatus && hitSearch
+      agent.mac?.toLowerCase().includes(q) ||
+      agent.organization?.toLowerCase().includes(q) ||
+      agent.site_id?.toLowerCase().includes(q)
+
+    const matchesStatus =
+      statusFilter.value === 'all' ||
+      (agent.status && agent.status.toLowerCase() === statusFilter.value.toLowerCase())
+
+    return matchesSearch && matchesStatus
   })
 })
 const hasSelection = computed(() => selected.value.size > 0)
-const allVisibleChecked = computed(() =>
-  filtered.value.length > 0 &&
-  filtered.value.every(r => selected.value.has(r.mac))
-)
+const allVisibleChecked = computed(() => filtered.value.length > 0 && filtered.value.every(r => selected.value.has(r.mac)))
+
 function toggleSel(mac) {
   const s = new Set(selected.value)
-  if (s.has(mac)) s.delete(mac)
-  else s.add(mac)
+  s.has(mac) ? s.delete(mac) : s.add(mac)
   selected.value = s
 }
 function toggleAllVisible(e) {
   const s = new Set(selected.value)
-  if (e.target.checked) {
-    filtered.value.forEach(r => s.add(r.mac))
-  } else {
-    filtered.value.forEach(r => s.delete(r.mac))
-  }
+  if (e.target.checked) filtered.value.forEach(r => s.add(r.mac))
+  else filtered.value.forEach(r => s.delete(r.mac))
   selected.value = s
 }
 
 /* ---------- Helpers ---------- */
 const badgeClass = (status) => {
-  if (!status) return 'secondary'
-  
+  if (!status) return 'gray'
   switch (status.toLowerCase()) {
-    case 'associated':
-      return 'success'
-    case 'unassociated':
-      return 'warning'
-    case 'deactivated':
-      return 'danger'
-    default:
-      return 'secondary'
+    case 'associated': return 'green'
+    case 'unassociated': return 'amber'
+    case 'deactivated': return 'red'
+    default: return 'gray'
   }
-}
-async function callJson(url, method, body) {
-  const token = localStorage.getItem('token') || ''
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: 'Bearer ' + token } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data?.error || data?.message || `${method} ${url} failed`)
-  return data
 }
 
 /* ---------- Row actions ---------- */
@@ -271,7 +247,6 @@ const testPing = async (mac) => {
     const data = await testAgent(mac)
     message.value = data.message || 'Ping successful!'
     ok.value = true
-    // Recharger la liste aprÃ¨s un test rÃ©ussi
     await load()
   } catch (err) {
     message.value = err.message || 'Ping failed'
@@ -325,19 +300,11 @@ const deleteSelected = () => {
 }
 const bulk = async (set, fn, verb) => {
   if (set.size === 0) return
-  
   const results = { success: 0, error: 0 }
-  const promises = Array.from(set).map(async mac => {
-    try {
-      await fn(mac)
-      results.success++
-    } catch (err) {
-      console.error(`Failed to ${verb} ${mac}:`, err)
-      results.error++
-    }
+  const tasks = Array.from(set).map(async mac => {
+    try { await fn(mac); results.success++ } catch { results.error++ }
   })
-  
-  await Promise.all(promises)
+  await Promise.all(tasks)
   message.value = `${verb} completed: ${results.success} succeeded, ${results.error} failed`
   ok.value = results.error === 0
   await load()
@@ -352,10 +319,7 @@ const openAssociate = () => {
   associateSiteId.value = ''
   showAssociate.value = true
 }
-
-const closeAssociate = () => {
-  showAssociate.value = false
-}
+const closeAssociate = () => { showAssociate.value = false }
 const confirmAssociate = async () => {
   const siteId = associateSiteId.value.trim()
   if (!siteId) {
@@ -364,20 +328,12 @@ const confirmAssociate = async () => {
     setTimeout(() => { message.value = '' }, 3000)
     return
   }
-
   const macs = Array.from(selected.value)
   const results = { success: 0, error: 0 }
-  
   for (const mac of macs) {
-    try {
-      await associateAgent(mac, siteId)
-      results.success++
-    } catch (err) {
-      console.error(`Failed to associate ${mac}:`, err)
-      results.error++
-    }
+    try { await associateAgent(mac, siteId); results.success++ }
+    catch { results.error++ }
   }
-  
   message.value = `Associated ${results.success} agents, ${results.error} failed`
   ok.value = results.error === 0
   closeAssociate()
@@ -448,9 +404,7 @@ th.sel, td.sel { width: 36px; }
 td.right, th.right { text-align: right; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
-.badge {
-  padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
-}
+.badge { padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .badge.green { background: rgba(34,197,94,.15); color: #22c55e; }
 .badge.red { background: rgba(239,68,68,.15); color: #ef4444; }
 .badge.amber { background: rgba(245,158,11,.15); color: #f59e0b; }
@@ -463,10 +417,7 @@ td.right, th.right { text-align: right; }
 .message.error { background: rgba(239,68,68,.1); color: #ef4444; }
 
 /* Associate modal */
-.modal-backdrop {
-  position: fixed; inset:0; background: rgba(0,0,0,.45);
-  display:grid; place-items:center; z-index: 40;
-}
+.modal-backdrop { position: fixed; inset:0; background: rgba(0,0,0,.45); display:grid; place-items:center; z-index: 40; }
 .modal {
   width: 100%; max-width: 440px; background: var(--panel-grey);
   border: 1px solid rgba(255,255,255,.06); border-radius: 12px; padding: 16px;
@@ -484,11 +435,7 @@ td.right, th.right { text-align: right; }
 
 /* Light-theme softening */
 [data-theme='light'] .card,
-[data-theme='light'] .modal {
-  background: #ffffff;
-  border-color: var(--panel-border);
-  box-shadow: var(--panel-shadow);
-}
+[data-theme='light'] .modal { background: #ffffff; border-color: var(--panel-border); box-shadow: var(--panel-shadow); }
 [data-theme='light'] .search-wrap { background: #fff; border-color: #e5e7eb; }
 [data-theme='light'] .table-wrapper { border-color: #e5e7eb; }
 [data-theme='light'] .badge.green { background: rgba(34,197,94,.12); color:#16a34a; }

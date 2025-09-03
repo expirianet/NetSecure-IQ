@@ -1,4 +1,4 @@
-﻿<!-- src/frontend/src/components/agents/AgentDashboard.vue -->
+<!-- src/frontend/src/views/agents/AgentDashboard.vue -->
 <template>
   <div class="agents-page">
     <!-- Background particles -->
@@ -79,25 +79,12 @@
                   <td>
                     <span :class="['state', stateClass(a.status)]">{{ label(a.status) }}</span>
                   </td>
-                  <td>{{ a.organization || 'â€”' }}</td>
-                  <td>{{ a.site || 'â€”' }}</td>
+                  <td>{{ a.organization || '—' }}</td>
+                  <td>{{ a.site || '—' }}</td>
                 </tr>
 
-                <tr v-if="isLoading">
-                  <td colspan="5" class="empty">
-                    <i class="fas fa-spinner fa-spin"></i> Loading agents...
-                  </td>
-                </tr>
-                <tr v-else-if="error">
-                  <td colspan="5" class="empty error">
-                    <i class="fas fa-exclamation-circle"></i> {{ error }}
-                  </td>
-                </tr>
-                <tr v-else-if="!filteredAgents.length">
-                  <td colspan="5" class="empty">
-                    <span v-if="query">No agents match your search.</span>
-                    <span v-else>No agents found. <a href="#" @click.prevent="$router.push('/agents/register')">Register a new agent</a></span>
-                  </td>
+                <tr v-if="!filteredAgents.length">
+                  <td colspan="5" class="empty">No agents match your search.</td>
                 </tr>
               </tbody>
             </table>
@@ -115,55 +102,36 @@
 import BackgroundParticles from '@/components/BackgroundParticles.vue'
 import { ref, computed, onMounted } from 'vue'
 
-// API base URL
-const API_BASE_URL = 'http://localhost:8000/api'
-
-// Agents data
+// State
 const agents = ref([])
-const isLoading = ref(true)
-const error = ref(null)
-
-// Fetch agents from API
-const fetchAgents = async () => {
-  try {
-    isLoading.value = true
-    const response = await fetch(`${API_BASE_URL}/mikrotik/list`)
-    if (!response.ok) throw new Error('Failed to fetch')
-    const data = await response.json()
-    agents.value = data.map(device => ({
-      mac: device.mac,
-      status: device.status || 'unassociated',
-      organization: device.organization || '',
-      site: device.site || '',
-      site_id: device.site_id || ''
-    }))
-  } catch (err) {
-    console.error('Failed to fetch agents:', err)
-    error.value = 'Failed to load agents. Please try again.'
-    showToast('Failed to load agents', 'error')
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// Initialize component
-onMounted(() => {
-  fetchAgents()
-})
-
-/** Search & selection */
+const loading = ref(false)
 const query = ref('')
 const selectedAgent = ref(null)
 const selectedIndex = ref(-1)
 
+// Computed
 const filteredAgents = computed(() => {
   const q = query.value.toLowerCase()
   if (!q) return agents.value
   return agents.value.filter(a =>
-    a.mac.toLowerCase().includes(q) ||
+    a.mac?.toLowerCase().includes(q) ||
     a.organization?.toLowerCase().includes(q) ||
-    a.site?.toLowerCase().includes(q)
+    a.site_id?.toLowerCase().includes(q)
   )
+})
+
+// Lifecycle
+onMounted(async () => {
+  loading.value = true
+  try {
+    const res = await fetch('http://localhost:8000/api/mikrotik/list')
+    agents.value = await res.json()
+  } catch (e) {
+    console.error('Failed to load agents:', e)
+    agents.value = []
+  } finally {
+    loading.value = false
+  }
 })
 
 function selectAgent(a, idx) {
@@ -180,81 +148,22 @@ const showToast = (msg, type = 'success') => {
   setTimeout(() => (toast.value = ''), 2200)
 }
 
-async function onAssociate() {
+function onAssociate() {
   if (!selectedAgent.value) return
-  
-  try {
-    const siteId = prompt('Enter Site ID to associate with this agent:')
-    if (!siteId) return
-    
-    const response = await fetch(`${API_BASE_URL}/mikrotik/associate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mac: selectedAgent.value.mac,
-        site_id: siteId
-      })
-    })
-    if (!response.ok) throw new Error('Association failed')
-    
-    await fetchAgents()
-    showToast('Agent associated successfully')
-  } catch (err) {
-    console.error('Association failed:', err)
-    showToast('Failed to associate agent', 'error')
-  }
+  selectedAgent.value.status = 'associated'
+  showToast('Agent associated.')
 }
-async function onDeactivate() {
+function onDeactivate() {
   if (!selectedAgent.value) return
-  
-  try {
-    const confirmDeactivate = confirm(`Are you sure you want to deactivate agent ${selectedAgent.value.mac}?`)
-    if (!confirmDeactivate) return
-    
-    const response = await fetch(`${API_BASE_URL}/mikrotik/disable`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mac: selectedAgent.value.mac
-      })
-    })
-    if (!response.ok) throw new Error('Deactivation failed')
-    
-    await fetchAgents()
-    showToast('Agent deactivated', 'success')
-  } catch (err) {
-    console.error('Deactivation failed:', err)
-    showToast('Failed to deactivate agent', 'error')
-  }
+  selectedAgent.value.status = 'deactivated'
+  showToast('Agent deactivated.', 'error')
 }
-async function onDelete() {
+function onDelete() {
   if (!selectedAgent.value) return
-  
-  try {
-    const confirmDelete = confirm(`Are you sure you want to delete agent ${selectedAgent.value.mac}? This action cannot be undone.`)
-    if (!confirmDelete) return
-    
-    const response = await fetch(`${API_BASE_URL}/mikrotik`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ mac: selectedAgent.value.mac })
-    })
-    if (!response.ok) throw new Error('Deletion failed')
-    
-    await fetchAgents()
-    selectedAgent.value = null
-    selectedIndex.value = -1
-    showToast('Agent deleted successfully', 'success')
-  } catch (err) {
-    console.error('Deletion failed:', err)
-    showToast('Failed to delete agent', 'error')
-  }
+  agents.value = agents.value.filter((_, i) => i !== selectedIndex.value)
+  selectedAgent.value = null
+  selectedIndex.value = -1
+  showToast('Agent deleted.', 'error')
 }
 
 /** Display helpers */
@@ -405,4 +314,3 @@ function rowTint(status) {
   .legend { justify-self: start; }
 }
 </style>
-
