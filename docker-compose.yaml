@@ -51,8 +51,8 @@ services:
     cap_add:
       - NET_ADMIN
     devices:
-      - /dev/net/tun
-      - /dev/kvm
+      - "/dev/net/tun"
+      - "/dev/kvm"
     ports:
       - "2222:22"    # SSH
       - "8728:8728"  # API
