@@ -1,4 +1,4 @@
-﻿<!-- src/frontend/src/components/agents/RegisterAgent.vue -->
+<!-- src/frontend/src/components/agents/RegisterAgent.vue -->
 <template>
   <div class="register-agent-page">
     <BackgroundParticles />
@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
 import { ref, computed } from 'vue'
 
 const mac = ref('')

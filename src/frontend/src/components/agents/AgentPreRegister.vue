@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
 import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'

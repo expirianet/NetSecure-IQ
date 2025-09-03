@@ -12,9 +12,9 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import TopNavigation from '@/components/TopNavigation.vue'
-import TopNavigationUser from '@/components/TopNavigationUser.vue'
-import TopNavigationOperator from '@/components/TopNavigationOperator.vue'
+import TopNavigation from '@/components/navigation/TopNavigation.vue'
+import TopNavigationUser from '@/components/navigation/TopNavigationUser.vue'
+import TopNavigationOperator from '@/components/navigation/TopNavigationOperator.vue'
 
 /* ---------- Rôle & navigation ---------- */
 const role = ref(localStorage.getItem('role') || '')

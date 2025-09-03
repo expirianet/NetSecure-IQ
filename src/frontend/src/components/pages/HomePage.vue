@@ -18,6 +18,7 @@
 
 <script setup>
 import { onMounted, onBeforeUnmount } from 'vue';
+import TopNavigation from '@/components/navigation/TopNavigation.vue';
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
   safeRender, observeTheme, destroyForId, themeIsDark

@@ -98,7 +98,7 @@
 </template>
 
 <script setup>
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
 import { computed, ref } from 'vue'
 
 const orgId = ref(localStorage.getItem('organization_id') || '')

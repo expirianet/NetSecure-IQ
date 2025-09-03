@@ -174,8 +174,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import BackgroundParticles from '@/components/BackgroundParticles.vue'
-import LineChart from '@/components/charts/LineChart.vue'
+import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
+import LineChart from '@/components/common/LineChart.vue'
 
 const router = useRouter()
 const go = (p) => router.push(p)

@@ -1,14 +1,14 @@
-﻿import { createRouter, createWebHashHistory } from 'vue-router'
-import HomePage from '@/components/HomePage.vue'
-import LoginForm from '@/components/LoginForm.vue'
-import RegisterForm from '@/components/RegisterForm.vue'
-import DashboardPage from '@/components/DashboardPage.vue'
-import OrganizationForm from '@/components/OrganizationForm.vue'
+import { createRouter, createWebHashHistory } from 'vue-router'
+import HomePage from '@/components/pages/HomePage.vue'
+import LoginForm from '@/components/auth/LoginForm.vue'
+import RegisterForm from '@/components/auth/RegisterForm.vue'
+import DashboardPage from '@/components/dashboard/DashboardPage.vue'
+import OrganizationForm from '@/components/organization/OrganizationForm.vue'
 import OrganizationProfile from '@/components/organization/OrganizationProfile.vue'
-import RouterTable from '@/components/RouterTable.vue'
-import AddUserForm from '@/components/AddUserForm.vue'
-import AddOperatorForm from '@/components/AddOperatorForm.vue'
-import DashboardOperator from '@/components/DashboardOperator.vue'
+import RouterTable from '@/components/dashboard/RouterTable.vue'
+import AddUserForm from '@/components/users/AddUserForm.vue'
+import AddOperatorForm from '@/components/users/AddOperatorForm.vue'
+import DashboardOperator from '@/components/dashboard/DashboardOperator.vue'
 
 import { useAuth } from '../appCore.js'
 
@@ -49,19 +49,19 @@ router.beforeEach((to, from, next) => {
   const { isAuthenticated } = useAuth()
   const role = (localStorage.getItem('role') || '').toLowerCase()
 
-  // Besoin d'Ãªtre connectÃ©
+  // Besoin d'être connecté
   if (to.meta.requiresAuth && !isAuthenticated.value) {
     next('/login')
     return
   }
 
-  // Si dÃ©jÃ  connectÃ© et on va vers login/register -> dashboard adaptÃ© au rÃ´le
+  // Si déjà connecté et on va vers login/register -> dashboard adapté au rôle
   if ((to.path === '/login' || to.path === '/register') && isAuthenticated.value) {
     next(role === 'operator' ? '/dashboard-operator' : '/dashboard')
     return
   }
 
-  // Un opÃ©rateur qui vise /dashboard est redirigÃ© vers /dashboard-operator
+  // Un opérateur qui vise /dashboard est redirigé vers /dashboard-operator
   if (to.path === '/dashboard' && role === 'operator') {
     next('/dashboard-operator')
     return
