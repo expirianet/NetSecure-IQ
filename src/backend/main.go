@@ -223,25 +223,24 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 		fmt.Println("📦 Headers:", r.Header)
 
 		origin := r.Header.Get("Origin")
-		fmt.Println("🌐 Origin:", origin)
-		allowedOrigins := []string{
-			"http://localhost:8080",
-			"http://localhost:8081",
-			"http://localhost:8082",
-			"http://localhost:8000",
+		if origin == "" {
+			origin = "*"
 		}
-		for _, o := range allowedOrigins {
-			if origin == o {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				break
-			}
-		}
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
+
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		// Call the next handler
 		h(w, r)
 	}
 }
@@ -511,20 +510,32 @@ func handleRouters(w http.ResponseWriter, r *http.Request) {
 // Organization & User routes
 // ===========================
 func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
+	// Set content type for the response
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Only POST method is allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
+
 	if !requireDB(w) {
 		return
 	}
 
 	var req OrganizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		http.Error(w, `{"error": "Invalid JSON body"}`, http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("📥 Received OrganizationRequest:\n%+v\n", req)
+
+	// Log the received request for debugging
+	fmt.Printf("📥 Received OrganizationRequest: %+v\n", req)
+
+	// Validate required fields
+	if req.Name == "" || req.VATNumber == "" || req.UserID == "" {
+		http.Error(w, `{"error": "Missing required fields"}`, http.StatusBadRequest)
+		return
+	}
 
 	var orgID string
 	err := db.QueryRow(`
@@ -540,21 +551,30 @@ func handleCompleteOrganization(w http.ResponseWriter, r *http.Request) {
 	`, req.Name, req.Address, req.VATNumber, req.State, req.City, req.ZipCode,
 		req.ContactEmail, req.PecEmail, req.SdiCode, req.ContactPhone,
 		req.PersonnelInfo).Scan(&orgID)
+
 	if err != nil {
-		http.Error(w, "Failed to insert organization: "+err.Error(), http.StatusInternalServerError)
+		errMsg := fmt.Sprintf(`{"error": "Failed to insert organization: %v"}`, err.Error())
+		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
 
 	_, err = db.Exec(`UPDATE users SET organization_id = $1, updated_at = now() WHERE id = $2`, orgID, req.UserID)
 	if err != nil {
-		http.Error(w, "Failed to update user with organization: "+err.Error(), http.StatusInternalServerError)
+		errMsg := fmt.Sprintf(`{"error": "Failed to update user with organization: %v"}`, err.Error())
+		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message":         "Organization created and linked successfully",
+	// Return success response
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Organization created and linked successfully",
 		"organization_id": orgID,
-	})
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, `{"error": "Failed to encode response"}`, http.StatusInternalServerError)
+	}
 }
 
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {

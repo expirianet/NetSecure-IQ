@@ -1,4 +1,3 @@
-
 <template>
   <div class="login-page">
     <!-- Fond animé isolé pour le form -->
@@ -14,55 +13,70 @@
             <!-- Organization Info -->
             <div class="form-section">
               <h4><i class="fas fa-building"></i> Organization Information</h4>
-              <input v-model="form.name" placeholder="Organization Name" required />
-              <input v-model="form.vat_number" placeholder="VAT Number or Fiscal Code" required />
-              <input v-model="form.address" placeholder="Address" required />
-              <div class="form-row">
-                <input v-model="form.city" placeholder="City" required />
-                <input v-model="form.state" placeholder="State" required />
-                <input v-model="form.zip_code" placeholder="ZIP Code" required />
+
+              <div class="form-group">
+                <label>Organization Name</label>
+                <input v-model="form.name" placeholder="Organization Name" required />
               </div>
-              <input v-model="form.email" type="email" placeholder="Email" required />
-              <input v-model="form.phone" type="tel" placeholder="Phone Number" required />
-              <input v-model="form.pec_email" type="email" placeholder="PEC Email (Optional)" />
-              <input v-model="form.sdi" placeholder="SDI Code (Optional)" />
-            </div>
 
-            <!-- Company Manager -->
-            <div class="form-section">
-              <h4><i class="fas fa-user-tie"></i> Company Manager</h4>
-              <input v-model="form.manager_name" placeholder="Name and Surname" required />
-              <input v-model="form.manager_email" type="email" placeholder="Email" required />
-              <input v-model="form.manager_phone" placeholder="Phone Number" required />
-            </div>
+              <div class="form-group">
+                <label>VAT Number</label>
+                <input v-model="form.vat_number" placeholder="VAT Number" required />
+              </div>
 
-            <!-- Technical Manager -->
-            <div class="form-section">
-              <h4><i class="fas fa-user-cog"></i> Technical Manager</h4>
-              <input v-model="form.technical_name" placeholder="Name and Surname" required />
-              <input v-model="form.technical_email" type="email" placeholder="Email" required />
-              <input v-model="form.technical_phone" placeholder="Phone Number" required />
-            </div>
+              <div class="form-group">
+                <label>Address</label>
+                <input v-model="form.address" placeholder="Full Address" required />
+              </div>
 
-            <!-- Data Controller -->
-            <div class="form-section">
-              <h4><i class="fas fa-shield-alt"></i> Data Controller</h4>
-              <input v-model="form.controller_name" placeholder="Name and Surname" required />
-              <input v-model="form.controller_email" type="email" placeholder="Email" required />
-              <input v-model="form.controller_phone" placeholder="Phone Number" required />
-            </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>City</label>
+                  <input v-model="form.city" placeholder="City" required />
+                </div>
+                <div class="form-group">
+                  <label>State</label>
+                  <input v-model="form.state" placeholder="State/Region" required />
+                </div>
+                <div class="form-group">
+                  <label>ZIP Code</label>
+                  <input v-model="form.zip_code" placeholder="ZIP/Postal Code" required />
+                </div>
+              </div>
 
-            <!-- Data Processor -->
-            <div class="form-section">
-              <h4><i class="fas fa-database"></i> Data Processor</h4>
-              <input v-model="form.processor_name" placeholder="Name and Surname" required />
-              <input v-model="form.processor_email" type="email" placeholder="Email" required />
-              <input v-model="form.processor_phone" placeholder="Phone Number" required />
+              <div class="form-group">
+                <label>Contact Email</label>
+                <input v-model="form.contact_email" type="email" placeholder="Email" required />
+              </div>
+
+              <div class="form-group">
+                <label>PEC Email</label>
+                <input v-model="form.pec_email" type="email" placeholder="PEC Email" required />
+              </div>
+
+              <div class="form-group">
+                <label>SDI Code</label>
+                <input v-model="form.sdi_code" placeholder="SDI Code" required />
+              </div>
+
+              <div class="form-group">
+                <label>Contact Phone</label>
+                <input v-model="form.contact_phone" type="tel" placeholder="Phone Number" required />
+              </div>
+
+              <div class="form-group">
+                <label>Personnel Information</label>
+                <textarea v-model="form.personnel_info" placeholder="Personnel information (roles, contacts, etc.)" rows="4" required></textarea>
+              </div>
             </div>
 
             <div class="form-actions">
-              <button type="submit" :disabled="loading">{{ loading ? 'Submitting...' : 'Submit' }}</button>
-              <button type="button" class="btn-secondary" @click="goToDashboard">Go to Dashboard</button>
+              <button type="submit" :disabled="loading" class="btn-primary">
+                {{ loading ? 'Saving...' : 'Save Organization' }}
+              </button>
+              <button type="button" class="btn-secondary" @click="goToDashboard">
+                Cancel
+              </button>
             </div>
 
             <p v-if="message" class="login-message" :class="messageType">{{ message }}</p>
@@ -88,185 +102,174 @@ const loading = ref(false)
 const successMessage = ref(false)
 const messageType = computed(() => (successMessage.value ? 'success' : 'error'))
 
-/* ---------- Particles (ID dédié + utilités robustes) ---------- */
+const token  = ref(localStorage.getItem('token')   || '')
+const userId = ref(localStorage.getItem('user_id') || '')
+
+/* ---- helpers: decode JWT -> user_id si absent ---- */
+function b64UrlDecode (str) {
+  try {
+    str = str.replace(/-/g, '+').replace(/_/g, '/')
+    const pad = str.length % 4
+    if (pad) str += '='.repeat(4 - pad)
+    return atob(str)
+  } catch (e) {
+    console.debug('[jwt] base64 decode failed', e)
+    return ''
+  }
+}
+function parseJwt (t) {
+  try { return JSON.parse(b64UrlDecode((t || '').split('.')[1] || '')) }
+  catch (e) { console.debug('[jwt] parse failed', e); return null }
+}
+
+/* ---- Particles ---- */
 const CONTAINER_ID = 'org-form-particles'
 let stopObs = () => {}
 function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
 
+/* ---- Etat du formulaire ---- */
+const form = reactive({
+  name: '',
+  vat_number: '',
+  address: '',
+  state: '',
+  city: '',
+  zip_code: '',
+  contact_email: '',
+  contact_phone: '',
+  pec_email: '',
+  sdi_code: '',
+  personnel_info: ''
+})
+
+/* Prefill depuis localStorage (si on revient sur le formulaire) */
+function loadLocalProfileIntoForm() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('organization_profile') || 'null')
+    if (saved && typeof saved === 'object') {
+      Object.assign(form, {
+        name: saved.name || '',
+        vat_number: saved.vat_number || '',
+        address: saved.address || '',
+        state: saved.state || '',
+        city: saved.city || '',
+        zip_code: saved.zip_code || '',
+        contact_email: saved.contact_email || '',
+        contact_phone: saved.contact_phone || '',
+        pec_email: saved.pec_email || '',
+        sdi_code: saved.sdi_code || '',
+        personnel_info: saved.personnel_info || ''
+      })
+    }
+  } catch (e) {
+    console.debug('[org] failed to prefill from localStorage', e)
+  }
+}
+
 onMounted(async () => {
+  if (!userId.value && token.value) {
+    const claims = parseJwt(token.value)
+    if (claims?.user_id) {
+      userId.value = claims.user_id
+      localStorage.setItem('user_id', userId.value)
+    }
+  }
+
+  loadLocalProfileIntoForm()
+
   try { await loadParticlesScript() }
   catch (e) { console.debug('[particles] load failed (non-blocking)', e) }
   ensurePJSDom()
   renderParticles()
   stopObs = observeTheme(CONTAINER_ID, renderParticles)
-
-  // pré-remplissage : d'abord localStorage, puis API
-  preloadFromLocal()
-  await preloadFromAPI()
 })
+
 onBeforeUnmount(() => {
   stopObs?.()
   ensurePJSDom()
   destroyForId(CONTAINER_ID)
 })
 
-/* ---------- État + helpers ---------- */
-const orgId = ref('') // conservé pour l'update
-const form = reactive({
-  name: '', vat_number: '', address: '', state: '', city: '', zip_code: '',
-  email: '', pec_email: '', sdi: '', phone: '',
-  manager_name: '', manager_email: '', manager_phone: '',
-  technical_name: '', technical_email: '', technical_phone: '',
-  controller_name: '', controller_email: '', controller_phone: '',
-  processor_name: '', processor_email: '', processor_phone: ''
-})
-
 const goToDashboard = () => router.push('/dashboard')
 
-function safe(v) { return (v ?? '').toString().trim() }
-function assignIf(key, v) { if (safe(v)) form[key] = v }
-
-/* ---------- Pré-chargement LOCAL ---------- */
-function readLocalProfile() {
-  try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
-  catch (e) { console.debug('[org] local read failed', e); return null }
-}
-function preloadFromLocal() {
-  const p = readLocalProfile()
-  if (!p) return
-  if (p.id) orgId.value = String(p.id)
-
-  // champs d'orga
-  assignIf('name',        p.name)
-  assignIf('vat_number',  p.vat_number)
-  assignIf('address',     p.address)
-  assignIf('city',        p.city)
-  assignIf('state',       p.state)
-  assignIf('zip_code',    p.zip_code)
-  assignIf('email',       p.contact_email || p.email)
-  assignIf('phone',       p.contact_phone || p.phone)
-  assignIf('pec_email',   p.pec_email)
-  assignIf('sdi',         p.sdi_code || p.sdi)
-
-  // responsables (local only)
-  if (p.manager)   { assignIf('manager_name',   p.manager.name);   assignIf('manager_email',   p.manager.email);   assignIf('manager_phone',   p.manager.phone) }
-  if (p.technical) { assignIf('technical_name', p.technical.name); assignIf('technical_email', p.technical.email); assignIf('technical_phone', p.technical.phone) }
-  if (p.controller){ assignIf('controller_name',p.controller.name);assignIf('controller_email',p.controller.email);assignIf('controller_phone', p.controller.phone) }
-  if (p.processor) { assignIf('processor_name', p.processor.name); assignIf('processor_email', p.processor.email); assignIf('processor_phone', p.processor.phone) }
-}
-
-/* ---------- Pré-chargement API ---------- */
-async function preloadFromAPI() {
-  const token = localStorage.getItem('token') || ''
-  if (!token) return
-  try {
-    const res = await fetch(`${API}/api/complete-organization`, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-    })
-    if (!res.ok) return
-    const data = await res.json().catch(() => ({}))
-    if (!data || !Object.keys(data).length) return
-
-    if (data.id) orgId.value = String(data.id)
-    assignIf('name',       data.name)
-    assignIf('vat_number', data.vat_number)
-    assignIf('address',    data.address)
-    assignIf('city',       data.city)
-    assignIf('state',      data.state)
-    assignIf('zip_code',   data.zip_code)
-    assignIf('email',      data.contact_email)
-    assignIf('phone',      data.contact_phone)
-    assignIf('pec_email',  data.pec_email)
-    assignIf('sdi',        data.sdi_code)
-
-    persistLocal()
-  } catch (e) { console.debug('[org] preloadFromAPI skipped', e) }
-}
-
-/* ---------- Construit le personnel_info (texte) ---------- */
-function buildPersonnelInfo() {
-  return `
-Company Manager:
-  Name: ${form.manager_name}
-  Email: ${form.manager_email}
-  Phone: ${form.manager_phone}
-
-Technical Manager:
-  Name: ${form.technical_name}
-  Email: ${form.technical_email}
-  Phone: ${form.technical_phone}
-
-Data Controller:
-  Name: ${form.controller_name}
-  Email: ${form.controller_email}
-  Phone: ${form.controller_phone}
-
-Data Processor:
-  Name: ${form.processor_name}
-  Email: ${form.processor_email}
-  Phone: ${form.processor_phone}
-`.trim()
-}
-
-/* ---------- Persistance locale unifiée ---------- */
-function asStoredObject() {
-  return {
-    id: orgId.value || undefined,
-    name: form.name, vat_number: form.vat_number, address: form.address,
-    city: form.city, state: form.state, zip_code: form.zip_code,
-    contact_email: form.email, contact_phone: form.phone,
-    pec_email: form.pec_email, sdi_code: form.sdi,
-    personnel_info: buildPersonnelInfo(),
-    manager:   { name: form.manager_name,   email: form.manager_email,   phone: form.manager_phone },
-    technical: { name: form.technical_name, email: form.technical_email, phone: form.technical_phone },
-    controller:{ name: form.controller_name,email: form.controller_email,phone: form.controller_phone },
-    processor: { name: form.processor_name, email: form.processor_email, phone: form.processor_phone },
+/* ---- Soumission ---- */
+async function submitForm() {
+  if (!token.value) {
+    message.value = 'You must be logged in to save organization data.'
+    successMessage.value = false
+    return
   }
-}
-function persistLocal() {
-  localStorage.setItem('organization_profile', JSON.stringify(asStoredObject()))
-}
-
-/* ---------- Submit ---------- */
-const submitForm = async () => {
-  const personnelInfo = buildPersonnelInfo()
-
-  const payload = {
-    id: orgId.value || undefined,
-    name: form.name, vat_number: form.vat_number, address: form.address,
-    state: form.state, city: form.city, zip_code: form.zip_code,
-    contact_email: form.email, pec_email: form.pec_email, sdi_code: form.sdi,
-    contact_phone: form.phone, personnel_info: personnelInfo,
-    user_id: localStorage.getItem('user_id'),
+  if (!userId.value) {
+    message.value = 'Unable to determine the current user. Please sign in again.'
+    successMessage.value = false
+    return
   }
 
   loading.value = true
   message.value = ''
-  successMessage.value = false
 
   try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`${API}/api/complete-organization`, {
+    // Clés exactement comme attendues par le backend (+ user_id)
+    const payload = {
+      name: form.name.trim(),
+      vat_number: form.vat_number.trim(),
+      address: form.address.trim(),
+      state: form.state.trim(),
+      city: form.city.trim(),
+      zip_code: form.zip_code.trim(),
+      contact_email: form.contact_email.trim(),
+      contact_phone: form.contact_phone.trim(),
+      pec_email: form.pec_email.trim(),
+      sdi_code: form.sdi_code.trim(),
+      personnel_info: form.personnel_info.trim(),
+      user_id: userId.value
+    }
+
+    const resp = await fetch(`${API}/api/complete-organization`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.value}`
+      },
+      body: JSON.stringify(payload)
     })
 
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || data.message || 'Request failed')
+    const raw = await resp.text()
+    let data = {}
+    try { data = raw ? JSON.parse(raw) : {} } catch (e) { data = {} }
 
-    if (data?.organization?.id) orgId.value = String(data.organization.id)
+    if (!resp.ok) {
+      const errorMsg = (data && (data.error || data.message)) || raw || 'Failed to save organization'
+      throw new Error(errorMsg)
+    }
 
-    persistLocal()
+    // Sauvegarde locale pour OrganizationProfile
+    const profileToStore = {
+      organization_id: data.organization_id || null,
+      name: payload.name,
+      vat_number: payload.vat_number,
+      address: payload.address,
+      state: payload.state,
+      city: payload.city,
+      zip_code: payload.zip_code,
+      contact_email: payload.contact_email,
+      contact_phone: payload.contact_phone,
+      pec_email: payload.pec_email,
+      sdi_code: payload.sdi_code,
+      personnel_info: payload.personnel_info
+    }
+    localStorage.setItem('organization_profile', JSON.stringify(profileToStore))
 
     successMessage.value = true
-    message.value = 'Organization info saved.'
-    setTimeout(() => router.push('/organization'), 400)
+    message.value = (data.message || 'Organization saved successfully!') +
+      (data.organization_id ? ` (ID: ${data.organization_id})` : '')
+
+    // Redirection douce (la page profil lira le localStorage)
+    setTimeout(() => { router.push('/dashboard') }, 1200)
   } catch (e) {
-    persistLocal()
-    successMessage.value = true
-    message.value = 'Organization info saved locally.'
-    setTimeout(() => router.push('/organization'), 400)
+    console.error('Error saving organization:', e)
+    message.value = e?.message || 'An error occurred while saving the organization.'
+    successMessage.value = false
   } finally {
     loading.value = false
   }
@@ -330,4 +333,3 @@ button[type='submit']:not(:disabled):hover { background-color: var(--primary-hov
   button { width: 100%; }
 }
 </style>
-

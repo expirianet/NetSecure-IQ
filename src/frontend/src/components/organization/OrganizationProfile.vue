@@ -1,7 +1,5 @@
-
 <template>
   <div class="org-page">
-    <!-- Fond animé isolé pour la page profil -->
     <div id="org-particles" class="particles-layer"></div>
 
     <div class="wrapper">
@@ -10,15 +8,24 @@
           <h2 class="title">NetSecure-IQ</h2>
           <h3 class="subtitle">Organization Profile</h3>
 
-          <div v-if="!org" class="empty">
+          <div v-if="loading" class="empty">
+            <p>Loading organization…</p>
+          </div>
+
+          <div v-else-if="!org" class="empty">
             <p>No organization information saved yet.</p>
-            <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
+            <div class="actions" style="justify-content:center">
+              <RouterLink class="btn primary" to="/organization/edit">Fill the form</RouterLink>
+              <button class="btn ghost" @click="refreshFromServer">Refresh from server</button>
+            </div>
+            <p v-if="message" class="hint">{{ message }}</p>
           </div>
 
           <div v-else class="content">
             <section class="section">
               <h4 class="section-title"><i class="fas fa-building"></i> Organization Information</h4>
               <div class="grid">
+                <div class="row"><label>Organization ID</label><span>{{ safe(org.organization_id) }}</span></div>
                 <div class="row"><label>Name</label><span>{{ safe(org.name) }}</span></div>
                 <div class="row"><label>VAT / Fiscal Code</label><span>{{ safe(org.vat_number) }}</span></div>
                 <div class="row wide"><label>Address</label><span>{{ safe(org.address) }}</span></div>
@@ -32,42 +39,6 @@
               </div>
             </section>
 
-            <section class="section">
-              <h4 class="section-title"><i class="fas fa-user-tie"></i> Company Manager</h4>
-              <div class="grid">
-                <div class="row"><label>Name</label><span>{{ person(manager).name }}</span></div>
-                <div class="row"><label>Email</label><span>{{ person(manager).email }}</span></div>
-                <div class="row"><label>Phone</label><span>{{ person(manager).phone }}</span></div>
-              </div>
-            </section>
-
-            <section v-if="hasTechnical" class="section">
-              <h4 class="section-title"><i class="fas fa-user-cog"></i> Technical Manager</h4>
-              <div class="grid">
-                <div class="row"><label>Name</label><span>{{ person(technical).name }}</span></div>
-                <div class="row"><label>Email</label><span>{{ person(technical).email }}</span></div>
-                <div class="row"><label>Phone</label><span>{{ person(technical).phone }}</span></div>
-              </div>
-            </section>
-
-            <section class="section">
-              <h4 class="section-title"><i class="fas fa-shield-alt"></i> Data Controller</h4>
-              <div class="grid">
-                <div class="row"><label>Name</label><span>{{ person(controller).name }}</span></div>
-                <div class="row"><label>Email</label><span>{{ person(controller).email }}</span></div>
-                <div class="row"><label>Phone</label><span>{{ person(controller).phone }}</span></div>
-              </div>
-            </section>
-
-            <section class="section">
-              <h4 class="section-title"><i class="fas fa-database"></i> Data Processor</h4>
-              <div class="grid">
-                <div class="row"><label>Name</label><span>{{ person(processor).name }}</span></div>
-                <div class="row"><label>Email</label><span>{{ person(processor).email }}</span></div>
-                <div class="row"><label>Phone</label><span>{{ person(processor).phone }}</span></div>
-              </div>
-            </section>
-
             <section v-if="org.personnel_info" class="section">
               <h4 class="section-title"><i class="fas fa-file-alt"></i> Personnel Info</h4>
               <pre class="pre">{{ org.personnel_info }}</pre>
@@ -75,8 +46,10 @@
 
             <div class="actions">
               <RouterLink class="btn primary" to="/organization/edit">Edit</RouterLink>
-              <button class="btn ghost" @click="clearLocal">Reset local data</button>
+              <button class="btn ghost" @click="resetAndRefresh">Reset &amp; refresh</button>
             </div>
+
+            <p v-if="message" class="hint">{{ message }}</p>
           </div>
         </div>
       </div>
@@ -85,30 +58,70 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import {
   ensurePJSDom, loadParticlesScript, defaultConfig,
-  safeRender, observeTheme, destroyForId, themeIsDark
+  safeRender, observeTheme, destroyForId, themeIsDark, API
 } from '@/appCore.js'
 
 const CONTAINER_ID = 'org-particles'
 let stopObs = () => {}
 function renderParticles() { return safeRender(CONTAINER_ID, defaultConfig(themeIsDark())) }
 
-/* Données locales */
+/* State */
+const token   = ref(localStorage.getItem('token') || '')
+const loading = ref(false)
+const message = ref('')
+
+/* Lecture locale (remplie par OrganizationForm) */
 function readLocal() {
   try { return JSON.parse(localStorage.getItem('organization_profile') || 'null') }
   catch (e) { console.debug('[org] read local failed', e); return null }
 }
 const org = ref(readLocal())
-const manager    = computed(() => org.value?.manager    || {})
-const technical  = computed(() => org.value?.technical  || null)
-const controller = computed(() => org.value?.controller || {})
-const processor  = computed(() => org.value?.processor  || {})
-const hasTechnical = computed(() => !!(technical.value && (technical.value.name || technical.value.email || technical.value.phone)))
+
 function safe(v) { return (v ?? '').toString().trim() || '—' }
-function person(p) { return { name: safe(p?.name), email: safe(p?.email), phone: safe(p?.phone) } }
-function clearLocal() { localStorage.removeItem('organization_profile'); org.value = null }
+function clearLocalOnly() { localStorage.removeItem('organization_profile'); org.value = null }
+
+/* Reset + tentative de reload serveur */
+async function resetAndRefresh() {
+  clearLocalOnly()
+  await refreshFromServer()
+}
+
+/* Best-effort GET depuis le serveur (si pas dispo : message propre) */
+async function refreshFromServer() {
+  message.value = ''
+  if (!token.value) {
+    message.value = 'You are not authenticated.'
+    return
+  }
+  loading.value = true
+  try {
+    const resp = await fetch(`${API}/api/complete-organization`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token.value}` }
+    })
+    const raw = await resp.text()
+    let data = {}
+    try { data = raw ? JSON.parse(raw) : {} } catch (e) { data = {} }
+
+    if (resp.ok && (data?.name || data?.vat_number || data?.address)) {
+      org.value = { ...(org.value || {}), ...data }
+      localStorage.setItem('organization_profile', JSON.stringify(org.value))
+      message.value = data.message ? String(data.message) : 'Organization loaded from server.'
+    } else {
+      org.value = readLocal()
+      message.value = 'No server data available. Fill the form to create an organization.'
+    }
+  } catch (e) {
+    console.error('[org] refresh error', e)
+    message.value = 'Failed to reach server. Showing local data if any.'
+    org.value = readLocal()
+  } finally {
+    loading.value = false
+  }
+}
 
 onMounted(async () => {
   document.title = 'NetSecure-IQ - Organization Profile'
@@ -142,7 +155,7 @@ onBeforeUnmount(() => {
 .wrapper{ position:relative; z-index:10; display:flex; align-items:flex-start; justify-content:center; padding:32px; min-height:100vh; }
 .container{ width:100%; max-width:1000px; }
 
-/* >>> Carte principale : identique à OrganizationForm */
+/* Carte */
 .card{
   background-color: var(--panel-grey);
   border-radius: 16px;
@@ -155,14 +168,13 @@ onBeforeUnmount(() => {
 .title{ text-align:center; font-size:20px; font-weight:600; color:var(--primary-accent); margin-bottom:6px; }
 .subtitle{ text-align:center; font-size:16px; margin-bottom:20px; }
 
-/* >>> Sections : identiques à OrganizationForm (.form-section) */
+/* Sections */
 .section{
   background-color: rgba(31,41,55,.30);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
   border: 1px solid rgba(255,255,255,.05);
-  transition: background-color .3s;
 }
 .section-title{
   color: var(--primary-accent);
@@ -200,20 +212,7 @@ span{ font-size:14px; color:var(--text-primary); }
 .btn.ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); color:var(--text-primary); }
 .btn.ghost:hover{ background:rgba(255,255,255,.10); }
 
-/* Light theme overrides – mêmes règles que OrganizationForm */
-:root:not([data-theme='dark']) .section{
-  background-color: rgba(243,244,246,.5);
-  border: 1px solid rgba(209,213,219,.5);
-}
-[data-theme='light'] .card{
-  background: #ffffff;
-  border-color: var(--panel-border);
-  box-shadow: var(--panel-shadow);
-}
-[data-theme='light'] .pre{
-  background:#ffffff; color:#0f172a; border-color: var(--panel-border);
-}
-
+.hint{ margin-top:8px; color:var(--text-secondary); font-size:13px; }
 .empty{ text-align:center; color:var(--text-secondary); padding:10px 0 4px; display:grid; gap:12px; }
 
 @media (max-width: 720px){
@@ -221,4 +220,3 @@ span{ font-size:14px; color:var(--text-primary); }
   .card{ padding:24px; }
 }
 </style>
-
