@@ -1,4 +1,4 @@
-<!-- src/frontend/src/components/agents/RegisterAgent.vue -->
+<!-- /src/frontend/src/components/agents/RegisterAgent.vue -->
 <template>
   <div class="register-agent-page">
     <BackgroundParticles />
@@ -35,7 +35,7 @@
                 autocomplete="off"
               />
               <button class="btn primary" type="submit" :disabled="loading || !macValid">
-                <i class="fas fa-microchip"></i>
+                <i class="fas" :class="loading ? 'fa-spinner fa-spin' : 'fa-microchip'"></i>
                 <span>{{ loading ? 'Generating…' : 'Generate Script' }}</span>
               </button>
             </div>
@@ -57,7 +57,7 @@
 
             <textarea class="code" readonly rows="12" :value="script"></textarea>
             <p class="note">
-              Apply the script via <em>Files ? Run Script</em> or through the router CLI.
+              Apply the script via <em>Files → Run Script</em> or through the router CLI.
             </p>
           </div>
 
@@ -82,35 +82,26 @@ const macRe = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i
 const macValid = computed(() => macRe.test(mac.value))
 
 function formatMac() {
-  // Uppercase + auto-insert ":" (AA:BB:…)
   let v = mac.value.replace(/[^0-9a-f]/gi, '').toUpperCase().slice(0, 12)
   mac.value = v.match(/.{1,2}/g)?.join(':') ?? ''
 }
 
-function makeDummyScript(macAddr) {
-  // Generate a plausible MikroTik script (local demo)
-  const last = macAddr.split(':').pop() || 'FF'
-  const ipOctet = parseInt(last, 16) || Math.floor(Math.random() * 200) + 10
-  return `
-# MikroTik WireGuard onboarding script (demo)
-# MAC: ${macAddr}
-# Run: /import file=script.rsc
-
-/interface wireguard add name=wg0 listen-port=51820 private-key="CHANGEME_PRIVATE"
-/ip address add address=10.10.10.${ipOctet}/32 interface=wg0
-
-# Server peer (adjust as needed)
-/interface wireguard peers add \\
-  interface=wg0 \\
-  public-key="SERVER_PUBLIC_KEY" \\
-  endpoint-address=vpn.example.com \\
-  endpoint-port=51820 \\
-  allowed-address=0.0.0.0/0 \\
-  persistent-keepalive=25s
-
-# Local tag
-:put "Pre-registered Agent (${macAddr})"
-`.trim()
+// Same-origin then fallback helper
+async function apiFetch(path, opts = {}) {
+  const rel = path.startsWith('/') ? path : `/${path}`
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  const token = localStorage.getItem('token')
+  if (token) headers.Authorization = headers.Authorization || `Bearer ${token}`
+  let res
+  try {
+    res = await fetch(rel, { ...opts, headers })
+    if (res.ok) return res
+  } catch (err) {
+    /* eslint-disable-next-line no-console */
+    console.debug('Same-origin fetch failed; will fallback to localhost:8000', err)
+  }
+  res = await fetch(`http://localhost:8000${rel}`, { ...opts, headers })
+  return res
 }
 
 async function onGenerate() {
@@ -118,12 +109,17 @@ async function onGenerate() {
   loading.value = true
   script.value = ''
   try {
-    // Here you could call a real backend endpoint if available.
-    // For now, we generate a consistent local "demo" script.
-    await new Promise(r => setTimeout(r, 500))
-    script.value = makeDummyScript(mac.value)
+    // Call real backend preregister
+    const res = await apiFetch('/api/mikrotik/preregister', {
+      method: 'POST',
+      body: JSON.stringify({ mac: mac.value })
+    })
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
+    const data = await res.json()
+    script.value = data.mikrotik_config || ''
+    showToast('Script generated.')
   } catch (e) {
-    showToast('Error while generating.', 'error')
+    showToast(e.message || 'Error while generating.', 'error')
   } finally {
     loading.value = false
   }
@@ -236,4 +232,3 @@ function showToast(msg, type = 'success') {
   .row{ grid-template-columns: 1fr; }
 }
 </style>
-

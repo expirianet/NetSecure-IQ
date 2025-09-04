@@ -1,3 +1,4 @@
+<!-- /src/frontend/src/views/agents/AgentPreRegister.vue -->
 <template>
   <div class="prereg-page">
     <BackgroundParticles />
@@ -93,7 +94,6 @@
 
 <script setup>
 import BackgroundParticles from '@/components/common/BackgroundParticles.vue'
-import { API } from '@/appCore.js'
 import { ref, reactive, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -115,14 +115,38 @@ function formatMac() {
 }
 const macValid = computed(() => /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac.value))
 
-import { preregister } from '@/appCore.js'
+// Mini helper fetch (same-origin then fallback)
+async function apiFetch(path, opts = {}) {
+  const rel = path.startsWith('/') ? path : `/${path}`
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  const token = localStorage.getItem('token')
+  if (token) headers.Authorization = headers.Authorization || `Bearer ${token}`
+  let res
+  try {
+    res = await fetch(rel, { ...opts, headers })
+    if (res.ok) return res
+  } catch (err) {
+    /* eslint-disable-next-line no-console */
+    console.debug('Same-origin fetch failed; will fallback to localhost:8000', err)
+  }
+  res = await fetch(`http://localhost:8000${rel}`, { ...opts, headers })
+  return res
+}
 
 async function submit() {
   if (!macValid.value) return showToast('Invalid MAC address', false)
   loading.value = true
   result.value = null
   try {
-    const data = await preregister(mac.value, siteId.value.trim() || undefined)
+    const res = await apiFetch('/api/mikrotik/preregister', {
+      method: 'POST',
+      body: JSON.stringify({
+        mac: mac.value,
+        site_id: siteId.value.trim() || undefined
+      })
+    })
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
+    const data = await res.json()
     result.value = data
     showToast('✅ Pre-registration complete')
   } catch (e) {
@@ -131,7 +155,6 @@ async function submit() {
     loading.value = false
   }
 }
-
 
 function copy(text) {
   navigator.clipboard.writeText(String(text || '')).then(
