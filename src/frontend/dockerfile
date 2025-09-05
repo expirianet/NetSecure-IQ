@@ -1,13 +1,26 @@
-# Étape 1 : build Vue
+# Étape 1 : build Vue (Vite)
 FROM node:18 AS builder
 WORKDIR /app
-COPY . .
-RUN yarn install && yarn build
 
-# Étape 2 : servir avec nginx
+# Installer via le lock s’il existe (cache fiable)
+COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
+RUN if [ -f yarn.lock ]; then yarn install --frozen-lockfile || yarn install ; \
+    elif [ -f package-lock.json ]; then npm ci ; \
+    else npm install ; \
+    fi
+
+# Build
+COPY . .
+RUN if [ -f yarn.lock ]; then yarn build ; else npm run build ; fi
+
+# Étape 2 : Nginx pour servir le frontend
 FROM nginx:stable-alpine
+
+# Contenu compilé
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Conf Nginx (relative au contexte src/frontend)
+COPY ./nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
